@@ -1,0 +1,7 @@
+.env
+.env.local
+
+WP_Agent.code-workspace
+
+.DS_Store
+**/.DS_Store

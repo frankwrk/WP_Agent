@@ -1,0 +1,64 @@
+services:
+  wp-db:
+    image: mariadb:11.4
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_DATABASE: wp_agent
+      MYSQL_USER: wp_agent
+      MYSQL_PASSWORD: wp_agent
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3306:3306"
+    volumes:
+      - wp_db_data:/var/lib/mysql
+
+  backend-db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: wpar
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - backend_db_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  wp:
+    image: wordpress:php8.2-apache
+    depends_on:
+      - wp-db
+    environment:
+      WORDPRESS_DB_HOST: wp-db:3306
+      WORDPRESS_DB_USER: wp_agent
+      WORDPRESS_DB_PASSWORD: wp_agent
+      WORDPRESS_DB_NAME: wp_agent
+    ports:
+      - "8080:80"
+    volumes:
+      - ../../apps/wp-plugin:/var/www/html/wp-content/plugins/wp-agent-runtime
+
+  backend:
+    image: node:20-alpine
+    depends_on:
+      - backend-db
+      - redis
+    working_dir: /workspace/apps/backend
+    command: sh -c "npm install && npm run dev"
+    environment:
+      PORT: 3001
+      DATABASE_URL: postgres://postgres:postgres@backend-db:5432/wpar
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "3001:3001"
+    volumes:
+      - ../..:/workspace
+
+volumes:
+  wp_db_data:
+  backend_db_data:
