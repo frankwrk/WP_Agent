@@ -64,16 +64,21 @@ export function buildPool(config: AppConfig, logger?: PoolLogger): Pool {
     );
   }
   const poolConfig: PoolConfig = { connectionString };
+
   const isProduction = process.env.NODE_ENV === "production";
 
-  if (isProduction) {
-    const certPath = config.supabaseSslRootCertPath.trim();
-    if (!certPath) {
-      throw new Error(
-        "Fatal config error: SUPABASE_SSL_ROOT_CERT_PATH is required in production for Postgres TLS CA verification.",
-      );
-    }
+  // In production we REQUIRE CA verification.
+  if (isProduction && !config.supabaseSslRootCertPath.trim()) {
+    throw new Error(
+      "Fatal config error: SUPABASE_SSL_ROOT_CERT_PATH is required in production for Postgres TLS CA verification.",
+    );
+  }
 
+  // Enable CA-verified TLS whenever a CA path is provided.
+  // This ensures deploy-time migrations (which may run without NODE_ENV=production)
+  // still use encrypted connections.
+  const certPath = config.supabaseSslRootCertPath.trim();
+  if (certPath) {
     if (!path.isAbsolute(certPath)) {
       throw new Error(
         `Fatal config error: SUPABASE_SSL_ROOT_CERT_PATH must be an absolute path (received: ${certPath}).`,
@@ -85,10 +90,12 @@ export function buildPool(config: AppConfig, logger?: PoolLogger): Pool {
       ca,
       rejectUnauthorized: true,
     };
+
     logSslMode(logger, "ca_verify", sslMode);
     return new Pool(poolConfig);
   }
 
+  // Non-production without a CA path: respect sslmode, but do not silently enable insecure SSL.
   if (sslMode && SSL_REQUIRED_MODES.has(sslMode)) {
     poolConfig.ssl = {
       rejectUnauthorized: false,
