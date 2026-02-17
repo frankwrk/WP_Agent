@@ -45,6 +45,7 @@ export interface AppConfig {
 
 const PRODUCTION_REQUIRED_ENV = [
   "DATABASE_URL",
+  "SUPABASE_SSL_ROOT_CERT_PATH",
   "PAIRING_BOOTSTRAP_SECRET",
   "BACKEND_SIGNING_PRIVATE_KEY",
   "BACKEND_SIGNING_AUDIENCE",
@@ -96,9 +97,12 @@ export function getConfig(): AppConfig {
       "PAIRING_RATE_LIMIT_PER_MINUTE_INSTALLATION",
       10,
     ),
-    chatModelFast: process.env.CHAT_MODEL_FAST ?? "google/gemini-2.5-flash-lite",
-    chatModelBalanced: process.env.CHAT_MODEL_BALANCED ?? "anthropic/claude-sonnet-4.5",
-    chatModelQuality: process.env.CHAT_MODEL_QUALITY ?? "anthropic/claude-opus-4.6",
+    chatModelFast:
+      process.env.CHAT_MODEL_FAST ?? "google/gemini-2.5-flash-lite",
+    chatModelBalanced:
+      process.env.CHAT_MODEL_BALANCED ?? "anthropic/claude-sonnet-4.5",
+    chatModelQuality:
+      process.env.CHAT_MODEL_QUALITY ?? "anthropic/claude-opus-4.6",
     chatModelReasoning: process.env.CHAT_MODEL_REASONING ?? "openai/gpt-5.2",
     chatRateLimitPerMinute: intFromEnv("CHAT_RATE_LIMIT_PER_MINUTE", 20),
     chatDailyTokenCap: intFromEnv("CHAT_DAILY_TOKEN_CAP", 50000),
@@ -122,7 +126,10 @@ export function getConfig(): AppConfig {
     skillsSyncTimeoutMs: intFromEnv("SKILLS_SYNC_TIMEOUT_MS", 20000),
     skillsSyncMaxDocuments: intFromEnv("SKILLS_SYNC_MAX_DOCUMENTS", 200),
     planDraftLlmTimeoutMs: intFromEnv("PLAN_DRAFT_LLM_TIMEOUT_MS", 25000),
-    planDraftManifestTimeoutMs: intFromEnv("PLAN_DRAFT_MANIFEST_TIMEOUT_MS", 10000),
+    planDraftManifestTimeoutMs: intFromEnv(
+      "PLAN_DRAFT_MANIFEST_TIMEOUT_MS",
+      10000,
+    ),
     planDraftMaxOutputChars: intFromEnv("PLAN_DRAFT_MAX_OUTPUT_CHARS", 30000),
   };
 }

@@ -7,7 +7,12 @@ interface PoolLogger {
   info(payload: Record<string, unknown>, message: string): void;
 }
 
-const SSL_REQUIRED_MODES = new Set(["require", "verify-ca", "verify-full", "no-verify"]);
+const SSL_REQUIRED_MODES = new Set([
+  "require",
+  "verify-ca",
+  "verify-full",
+  "no-verify",
+]);
 let hasLoggedSslMode = false;
 
 function normalizeConnectionString(raw: string): {
@@ -15,7 +20,8 @@ function normalizeConnectionString(raw: string): {
   sslMode?: string;
 } {
   const parsed = new URL(raw);
-  const sslMode = parsed.searchParams.get("sslmode")?.trim().toLowerCase() ?? undefined;
+  const sslMode =
+    parsed.searchParams.get("sslmode")?.trim().toLowerCase() ?? undefined;
   parsed.searchParams.delete("sslmode");
   return {
     connectionString: parsed.toString(),
@@ -44,10 +50,19 @@ function logSslMode(
 
 export function buildPool(config: AppConfig, logger?: PoolLogger): Pool {
   if (!config.databaseUrl) {
-    throw new Error("DATABASE_URL is required to create a Postgres connection pool.");
+    throw new Error(
+      "DATABASE_URL is required to create a Postgres connection pool.",
+    );
   }
 
-  const { connectionString, sslMode } = normalizeConnectionString(config.databaseUrl);
+  const { connectionString, sslMode } = normalizeConnectionString(
+    config.databaseUrl,
+  );
+  if (process.env.NODE_ENV === "production" && sslMode === "no-verify") {
+    throw new Error(
+      "Fatal config error: DATABASE_URL must not use sslmode=no-verify in production. Remove the sslmode param and rely on SUPABASE_SSL_ROOT_CERT_PATH CA verification.",
+    );
+  }
   const poolConfig: PoolConfig = { connectionString };
   const isProduction = process.env.NODE_ENV === "production";
 
