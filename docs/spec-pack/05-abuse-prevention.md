@@ -1,151 +1,52 @@
-# **Abuse Prevention & Billing Controls**
+# Abuse Prevention (M3)
 
-## **AP-1 Goals**
+## Scope
 
-- Prevent unauthorized use of billable inference.
-- Bound worst-case spend per installation/account/run.
-- Contain damage from compromised WP admin credentials.
-- Make execution deterministic and auditable.
+M3 extends abuse controls to skills ingestion and planner draft generation.
 
-## **AP-2 Threat surfaces**
+## Enforced Controls
 
-1. **Backend API endpoints** that can trigger LLM calls (chat, plan, execute).
-2. **WP Tool API** endpoints (especially write tools).
-3. **Installation pairing** (fraudulent onboarding / proxy abuse).
-4. **Prompt injection** via WP content and user inputs.
-5. **Runaway orchestration loops** (excess LLM/tool calls).
-6. **Model routing misuse** (expensive models, large contexts, retries).
-7. **Replay/forgery** on backend↔WP server-to-server calls.
+### 1) Auth path remains mandatory
 
-## **AP-3 Mandatory controls (MUST)**
+- Browser -> WP admin proxy (`nonce` + capability)
+- WP admin proxy -> backend (`X-WP-Agent-Bootstrap`)
 
-### **1) Hard caps (backend-enforced)**
+### 2) Commit pinning for skill ingestion
 
-- Per installation:
-  - daily_cost_cap_usd
-  - daily_tokens_cap
-  - max_parallel_runs
-- Per account/user:
-  - daily_cost_cap_usd
-  - daily_runs_cap
-- Per run:
-  - max_cost_usd
-  - max_total_tokens
-  - max_llm_calls
-  - max_tool_calls
-- Per skill:
-  - max_pages_per_run
-  - require_draft_first
-  - tool allowlist
+- Skills sync requires explicit `commit_sha`
+- Floating refs are rejected (`SKILL_COMMIT_REQUIRED`)
+- Ingestion provenance is stored (`repo_url`, `commit_sha`, hash)
 
-**Behavior**
+### 3) Tool allowlist and registry checks
 
-- When cap reached → **hard stop**:
-  - return error code BUDGET_EXCEEDED
-  - set rate_limited_until (cooldown)
-  - optionally set installation.suspended=true if anomalous
+- Unknown tools fail ingestion (`SKILL_UNKNOWN_TOOL`)
+- Draft plans must reference tools in:
+  - static backend registry, and
+  - installation WP manifest, and
+  - selected skill allowlist
 
-### **2) Two-phase commit (plan → execute)**
+### 4) Policy-enforced LLM planning call
 
-- **Plan phase**: read-only tools + a single bounded LLM call to output plan + estimate.
-- **Execute phase**: requires explicit approval + executes with bounded batches and stop conditions.
+Planner draft uses one bounded LLM call through backend policy stack:
 
-### **3) Rate limiting (backend + WP)**
+- policy preset model routing
+- per-minute rate limiting
+- daily token budget checks
 
-- Backend: token bucket in Redis (or equivalent) per:
-  - IP address (signup/login/run creation)
-  - account/user
-  - installation
-- WP: per-installation request throttles for tool execution endpoints (transients ok).
+### 5) Deterministic server-side estimate/risk
 
-### **4) Signed server-to-server requests + idempotency**
+Estimate and risk are computed server-side only and enforce caps with machine-readable codes.
 
-- Every backend→WP tool call includes:
-  - tool_call_id UUID
-  - timestamp + TTL
-  - signature over canonical payload
-- WP rejects:
-  - expired ts/TTL
-  - duplicate tool_call_id
-  - bad signature
+### 6) Approval-only M3 semantics
 
-### **5) Policy-driven model routing (no free-form model selection)**
+`POST /plans/:id/approve` only transitions `validated -> approved` and appends an audit event.
+No execution side effects are allowed in M3.
 
-- Plugin UI selects a **policy** (Fast/Balanced/Quality/Reasoning).
-- Backend chooses model/provider from allowlist + fallback chain.
+## Data for Auditability
 
-### **6) Prompt-injection containment**
+- `skill_ingestions`
+- `skill_specs`
+- `plans`
+- `plan_events`
 
-- Treat WP content as untrusted.
-- Always pass WP context as **structured summaries** (JSON), never raw HTML dumps by default.
-- Enforce instruction hierarchy (policy > skill constraints > user > retrieved content).
-
-### **7) Anomaly detection + kill switch**
-
-- Detect spikes:
-  - tokens/minute
-  - run count/time
-  - repeated tool failures
-  - unusual IP/geolocation
-- Automatic response:
-  - suspend installation + notify
-  - require manual re-enable
-
----
-
-## **AP-4 “Cost estimation + dry run” requirements**
-
-Before execute:
-
-- backend must compute an **estimate**:
-  - expected pages (if skill produces pages)
-  - expected LLM calls
-  - expected tool calls
-  - estimated token usage range
-  - estimated cost range
-- if estimate exceeds any cap → block run at plan time.
-
----
-
-## **AP-5 Per-skill guardrails (example: programmatic-seo)**
-
-- default draft_only = true
-- max_pages_per_run = 200
-- batch_size = 25
-- must include checkpoint: “Approve creating N drafts”
-- optional: noindex_if_thin = true
-
-## **Backend Enforcement (Authoritative)**
-
-apps/backend/src/services/policy/
-policy.schema.ts
-policy.store.ts
-enforcement.ts
-limiter.ts
-anomaly.ts
-
-Usage Ledger
-
-apps/backend/src/services/llm/usage.ledger.ts
-
-## **Enforcement Points**
-
-- Every LLM call
-- Every tool call
-- Every run start
-- Before and after each execution step
-
-## **MUST Enforced Limits**
-
-- daily_cost_cap_usd
-- per_run_cost_cap_usd
-- max_llm_calls_per_run
-- max_tool_calls_per_run
-- max_parallel_runs
-- per-skill page caps
-
-## **Tests**
-
-- Budget exceeded mid-run stops execution
-- Daily cap suspends installation
-- Anomaly trigger auto-suspends
+Each plan stores validation issues, estimates, risk, model/tokens, and plan hash for traceability.

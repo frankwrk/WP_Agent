@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wp-agent.dev/schemas/plan.contract.v1.json",
+  "title": "PlanContractV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "plan_version",
+    "skill_id",
+    "goal",
+    "assumptions",
+    "inputs",
+    "steps"
+  ],
+  "properties": {
+    "plan_version": {
+      "const": 1
+    },
+    "skill_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "goal": {
+      "type": "string",
+      "minLength": 1
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "inputs": {
+      "type": "object"
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "step_id",
+          "title",
+          "objective",
+          "tools",
+          "expected_output"
+        ],
+        "properties": {
+          "step_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "objective": {
+            "type": "string",
+            "minLength": 1
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "expected_output": {
+            "type": "string",
+            "minLength": 1
+          },
+          "page_count_estimate": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "tool_call_estimate": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    }
+  }
+}

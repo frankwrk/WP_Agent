@@ -431,3 +431,10 @@ Unauthorized distribution, modification, or commercial reuse without explicit wr
   - Added WP admin REST proxy endpoints (`connect/status`, `chat/sessions`, `chat/sessions/current`, `chat/sessions/{id}/messages`).
   - Added React admin Connect + Chat pages with policy selector and persisted session message flow.
   - Added backend unit/e2e tests for manifest validation, policy enforcement, usage ledger, and sessions/chat behavior.
+
+- 2026-02-17 — M3
+  - Added backend skills registry APIs (`/api/v1/skills/sync`, `/api/v1/skills`, `/api/v1/skills/:skillId`) with pinned-commit ingestion, normalization, allowlist validation, and provenance persistence.
+  - Added backend plan-phase APIs (`/api/v1/plans/draft`, `/api/v1/plans/:planId`, `/api/v1/plans/:planId/approve`) with policy-enforced planner call, strict JSON parsing, deterministic validation/estimate/risk/hash, and status/event persistence.
+  - Added Postgres migration `003_m3_skills_plans.sql` for `skill_ingestions`, `skill_specs`, `plans`, and `plan_events`.
+  - Added WP admin proxy endpoints for skills/plans and new React admin Skills page with skill explorer, plan preview, and approve action.
+  - Added M3 backend unit/e2e tests for skill normalization, plan parsing/validation/estimation, skills sync, plan draft, and plan approve behavior.

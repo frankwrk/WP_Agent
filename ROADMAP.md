@@ -25,18 +25,18 @@
 
 ## M3 — Skills + Plan phase
 
-- [ ] Backend: ingest marketingskills repo (pin commit hash + provenance)
-  [ ] Define SkillSpec canonical schema v1 + normalizer
-  [ ] SkillSpec store: versioning + tagging + indexing
-  [ ] Backend: tool registry v1 (schemas, safety class, cost weights)
-  [ ] Bind skills ↔ tools (allowlists) and validate at plan-time
-  [ ] Define PlanContract schema v1 (plan_id, plan_hash, steps, assumptions)
-  [ ] Implement PlanContract parser (strict, single-block) + validator (schema + policy)
-  [ ] Estimation engine v1 (pages, tool calls, tokens buckets, cost bands, runtime)
-  [ ] Plan risk scoring + gating rules (machine-readable failures)
-  [ ] Persist plans + plan_events (approved/draft/rejected)
-  [ ] UI: Skills explorer (filters + detail)
-  [ ] UI: Plan preview (steps, estimate, risk, approve action)
+- [x] Backend: ingest marketingskills repo (pin commit hash + provenance)
+  [x] Define SkillSpec canonical schema v1 + normalizer
+  [x] SkillSpec store: versioning + tagging + indexing
+  [x] Backend: tool registry v1 (schemas, safety class, cost weights)
+  [x] Bind skills ↔ tools (allowlists) and validate at plan-time
+  [x] Define PlanContract schema v1 (plan_id, plan_hash, steps, assumptions)
+  [x] Implement PlanContract parser (strict, single-block) + validator (schema + policy)
+  [x] Estimation engine v1 (pages, tool calls, tokens buckets, cost bands, runtime)
+  [x] Plan risk scoring + gating rules (machine-readable failures)
+  [x] Persist plans + plan_events (approved/draft/rejected)
+  [x] UI: Skills explorer (filters + detail)
+  [x] UI: Plan preview (steps, estimate, risk, approve action)
   [ ] (Optional) Plan diff view for regenerated plans
 
 ## M4 — Execute phase (pSEO v1)

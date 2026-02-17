@@ -11,6 +11,8 @@ require_once __DIR__ . '/tools/seo.php';
 require_once __DIR__ . '/admin/pair.php';
 require_once __DIR__ . '/admin/connect.php';
 require_once __DIR__ . '/admin/chat.php';
+require_once __DIR__ . '/admin/skills.php';
+require_once __DIR__ . '/admin/plans.php';
 
 class Routes
 {
@@ -51,5 +53,7 @@ class Routes
         Admin\Pair::register();
         Admin\Connect::register();
         Admin\Chat::register();
+        Admin\Skills::register();
+        Admin\Plans::register();
     }
 }

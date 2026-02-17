@@ -3,7 +3,11 @@ import type {
   ChatMessage,
   ChatSession,
   ConnectStatus,
+  PlanContractApi,
+  PlanEvent,
   PolicyPreset,
+  SkillCatalogItem,
+  SkillSpec,
 } from "./types";
 
 function getConfig() {
@@ -81,4 +85,92 @@ export async function sendMessage(sessionId: string, content: string): Promise<{
     method: "POST",
     body: JSON.stringify({ content }),
   });
+}
+
+export interface SkillsListParams {
+  tag?: string;
+  safetyClass?: "read" | "write_draft" | "write_publish";
+  deprecated?: boolean;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export async function syncSkills(repoUrl: string, commitSha: string): Promise<{
+  ingestion_id: string;
+  status: string;
+  skill_count: number;
+}> {
+  return apiRequest<{
+    ingestion_id: string;
+    status: string;
+    skill_count: number;
+  }>("/skills/sync", {
+    method: "POST",
+    body: JSON.stringify({
+      repo_url: repoUrl,
+      commit_sha: commitSha,
+    }),
+  });
+}
+
+export async function listSkills(params: SkillsListParams = {}): Promise<{
+  items: SkillCatalogItem[];
+}> {
+  const query = new URLSearchParams();
+  if (params.tag) {
+    query.set("tag", params.tag);
+  }
+  if (params.safetyClass) {
+    query.set("safety_class", params.safetyClass);
+  }
+  if (params.deprecated !== undefined) {
+    query.set("deprecated", String(params.deprecated));
+  }
+  if (params.search) {
+    query.set("search", params.search);
+  }
+  if (params.limit) {
+    query.set("limit", String(params.limit));
+  }
+  if (params.offset) {
+    query.set("offset", String(params.offset));
+  }
+
+  return apiRequest<{ items: SkillCatalogItem[] }>(`/skills?${query.toString()}`);
+}
+
+export async function getSkill(skillId: string): Promise<SkillSpec> {
+  return apiRequest<SkillSpec>(`/skills/${encodeURIComponent(skillId)}`);
+}
+
+export async function draftPlan(payload: {
+  policyPreset: PolicyPreset;
+  skillId: string;
+  goal: string;
+  inputs: Record<string, unknown>;
+}): Promise<{ plan: PlanContractApi; events: PlanEvent[] }> {
+  return apiRequest<{ plan: PlanContractApi; events: PlanEvent[] }>("/plans/draft", {
+    method: "POST",
+    body: JSON.stringify({
+      policy_preset: payload.policyPreset,
+      skill_id: payload.skillId,
+      goal: payload.goal,
+      inputs: payload.inputs,
+    }),
+  });
+}
+
+export async function getPlan(planId: string): Promise<{ plan: PlanContractApi; events: PlanEvent[] }> {
+  return apiRequest<{ plan: PlanContractApi; events: PlanEvent[] }>(`/plans/${encodeURIComponent(planId)}`);
+}
+
+export async function approvePlan(planId: string): Promise<{ plan: PlanContractApi; events: PlanEvent[] }> {
+  return apiRequest<{ plan: PlanContractApi; events: PlanEvent[] }>(
+    `/plans/${encodeURIComponent(planId)}/approve`,
+    {
+      method: "POST",
+      body: JSON.stringify({}),
+    },
+  );
 }

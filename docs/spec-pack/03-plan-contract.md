@@ -1,108 +1,79 @@
-## PlanContract v1 (Canonical Schema)
+# Plan Contract v1 (M3)
 
-Required Top-Level Fields
+## Purpose
 
-``` 
-ts
-type PlanContractV1 = {
-  plan_version: 1
-  plan_id: string           // UUID
-  plan_hash: string         // sha256 of canonical JSON
-  goal: string
-  assumptions: string[]
-  inputs: Record<string, unknown>
-  steps: PlanStep[]
-  estimates: PlanEstimate   // computed, not LLM-provided
-  risk: PlanRiskScore       // computed
-  policy_context: {
-    policy_id: string
-    snapshot_id: string
-  }
-}
-```
-## Determinism Rules
+Plan generation is now a dedicated backend phase (`/api/v1/plans/*`) and remains execute-free in M3.
+Approval is a status transition only.
 
-Define:
-	•	Stable step ordering
-	•	Step IDs required (step_id)
-	•	No freeform steps
-	•	Canonical JSON serialization before hashing
-	•	plan_hash computed after validation, not before
+## Canonical Shape
 
-This ensures:
-	•	identical input → identical plan_hash
-	•	diffable plans
-	•	replay detection later
+`PlanContractV1` is returned by `POST /api/v1/plans/draft` and `GET /api/v1/plans/:planId`.
 
-## Plan Lifecycle
+Required fields:
 
-draft → validated → approved → (M4: executing → completed | failed)
+- `plan_version` (`1`)
+- `plan_id` (UUID)
+- `plan_hash` (sha256 of canonical JSON)
+- `skill_id`
+- `goal`
+- `assumptions[]`
+- `inputs{}`
+- `steps[]`
+- `estimates{}` (server-computed)
+- `risk{}` (server-computed)
+- `validation_issues[]`
+- `policy_context{ policy_preset, model, max_steps, max_tool_calls, max_pages, max_cost_usd }`
+- `status` (`validated` or `rejected` at draft time; `approved` after approve endpoint)
 
-## Validation & Gating Codes
+## Parse Rules (Strict)
 
-PLAN_INVALID_TOOL
-PLAN_TOOL_NOT_ALLOWED
-PLAN_STEP_CAP_EXCEEDED
-PLAN_PAGE_CAP_EXCEEDED
-PLAN_COST_CAP_EXCEEDED
-PLAN_SCHEMA_INVALID
+Planner output must be exactly one JSON object:
 
-## Estimation Contract
+- allowed: raw JSON object
+- allowed: one fenced `json` block containing one JSON object
+- rejected: multiple fenced blocks (`PLAN_PARSE_MULTIBLOCK`)
+- rejected: prose/extra text (`PLAN_PARSE_NONJSON`)
+- rejected: invalid object schema (`PLAN_SCHEMA_INVALID`)
 
-Reference estimate.ts.
+## Validation and Gating Codes
 
-Define:
-	•	estimated_pages
-	•	estimated_tool_calls (per tool)
-	•	estimated_tokens_bucket
-	•	estimated_cost_usd
-	•	estimated_runtime_sec
-	•	confidence_band
+- `PLAN_INVALID_TOOL`
+- `PLAN_TOOL_NOT_ALLOWED`
+- `PLAN_STEP_CAP_EXCEEDED`
+- `PLAN_PAGE_CAP_EXCEEDED`
+- `PLAN_COST_CAP_EXCEEDED`
+- `PLAN_SCHEMA_INVALID`
 
-Important:
-Estimates must be computed server-side only.
+Validation enforces:
 
-## Plan Risk Scoring
+- `step_id` required and unique
+- skill/tool allowlist compatibility
+- tool presence in static backend registry
+- tool presence in installation WP manifest at plan time
+- policy and per-skill caps
 
-Define risk tiers:
-LOW    (read-only)
-MEDIUM (draft writes)
-HIGH   (bulk writes)
+## Estimation and Risk
 
-And scoring factors:
-	•	number_of_steps
-	•	write_intensity
-	•	tool_novelty
-	•	cost_ratio_to_cap
+Estimate is deterministic and server-side only:
 
-Risk score must be stored in PlanContract.
+- `estimated_pages`
+- `estimated_tool_calls` (per tool)
+- `estimated_tokens_bucket`
+- `estimated_cost_usd_band`
+- `estimated_runtime_sec`
+- `confidence_band`
+- internal numeric `estimated_cost_usd` for gating
 
-## Backend Implementation
+Risk tiers:
 
-apps/backend/src/services/plans/
-plan.contract.ts
-plan.parse.ts
-plan.validate.ts
-estimate.ts
+- `LOW` for read-only plans
+- `MEDIUM` for draft-write plans
+- `HIGH` for publish/bulk-write plans
 
-Shared Types
+## Lifecycle
 
-packages/shared/src/types/plan.ts
-packages/shared/src/schemas/plan.schema.json
+- `draft` event appended on creation
+- `validated` or `rejected` event appended after validation
+- `approved` event appended by `POST /api/v1/plans/:planId/approve`
 
-Tests
-apps/backend/test/unit/plan.validate.test.ts
-
-### **Enforcement Points**
-
-- Validate:
-  - Tool exists in manifest
-  - Tool is allowed in skill allowlist
-  - Step count ≤ policy caps
-  - Page count ≤ skill caps
-- Reject invalid plans before execution
-
-See:
-- 02-tool-api.md (Tool Registry v1)
-- 04-skill-spec.md (Skill ↔ Tool binding)
-- 05-abuse-prevention.md (Estimation + caps)
+M3 stops at approval and does not execute plan steps.

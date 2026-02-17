@@ -1,0 +1,28 @@
+{
+  "skill_id": "wp.content.audit",
+  "version": "1.0.0",
+  "name": "Content Audit",
+  "description": "Audit WordPress content inventory and environment metadata",
+  "tags": ["seo", "audit"],
+  "inputs_schema": {
+    "type": "object",
+    "properties": {
+      "section": { "type": "string" }
+    }
+  },
+  "outputs_schema": {
+    "type": "object",
+    "properties": {
+      "summary": { "type": "string" }
+    }
+  },
+  "tool_allowlist": ["site.get_environment", "content.inventory", "seo.get_config"],
+  "caps": {
+    "max_pages": 25,
+    "max_tool_calls": 20,
+    "max_steps": 8,
+    "max_cost_usd": 2
+  },
+  "safety_class": "read",
+  "deprecated": false
+}

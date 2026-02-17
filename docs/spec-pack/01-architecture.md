@@ -1,37 +1,53 @@
-# Architecture Notes (M2)
+# Architecture Notes (M3)
 
-## Admin UI
+## Admin UI Pages
 
-React pages implemented in:
+React admin pages now include:
 
-- `apps/wp-plugin/admin/src/pages/Connect.tsx`
-- `apps/wp-plugin/admin/src/pages/Chat.tsx`
+- `Connect` (pairing status + pair action)
+- `Chat` (M2 read-only session chat)
+- `Skills` (M3 skill explorer + plan preview + approve action)
 
-WordPress registers menu pages and enqueues the Vite bundle from:
+Implemented in:
 
-- `apps/wp-plugin/includes/admin/ui.php`
+- `/Users/frank/dev/Code/Work/WP_Agent/apps/wp-plugin/admin/src/pages/Connect.tsx`
+- `/Users/frank/dev/Code/Work/WP_Agent/apps/wp-plugin/admin/src/pages/Chat.tsx`
+- `/Users/frank/dev/Code/Work/WP_Agent/apps/wp-plugin/admin/src/pages/Skills.tsx`
 
 ## Request Flow
 
-1. Browser (WP admin) calls `wp-agent-admin/v1/*` using WP nonce.
-2. WP admin REST proxy validates capability + nonce.
-3. WP server calls backend `/api/v1/sessions*` with `X-WP-Agent-Bootstrap`.
-4. Backend validates policy + installation + scope.
-5. Backend loads WP tool context once (session create), then reuses snapshot for chat.
+1. Browser calls `wp-agent-admin/v1/*` with WP REST nonce.
+2. WP admin proxy validates nonce + `manage_options` capability.
+3. WP proxy calls backend `api/v1/*` with `X-WP-Agent-Bootstrap`.
+4. Backend enforces installation scope and policy limits.
+5. Backend returns normalized contracts for UI rendering.
 
-## Runtime Rules
+## M3 Skills + Plan Path
 
-- No direct browser-to-LLM calls.
-- No direct browser-to-backend calls.
-- Tool context is provided by signed backend->WP calls.
-- Chat is read-only in M2.
+### Skills
 
-## Shared Contracts
+- Sync endpoint: `POST /api/v1/skills/sync`
+- Query endpoints: `GET /api/v1/skills`, `GET /api/v1/skills/:skillId`
+- Source pinned by `repo_url + commit_sha`
+- Stored with ingestion provenance in Postgres
 
-`packages/shared/src` defines shared interfaces for:
+### Plans
 
-- policy presets
-- tool manifest/tool definitions
-- plan/skill placeholders
+- Draft endpoint: `POST /api/v1/plans/draft`
+- Read endpoint: `GET /api/v1/plans/:planId`
+- Approve endpoint: `POST /api/v1/plans/:planId/approve`
 
-These shared types are used as canonical contract definitions for later milestones.
+Plan draft pipeline:
+
+- load selected skill
+- run one policy-bounded LLM planner call
+- strict JSON parse
+- validate against static tool registry + skill allowlist + WP manifest
+- compute deterministic estimate/risk/hash server-side
+- persist plan + plan events
+
+## M3 Boundaries
+
+- No execute pipeline yet (M4 scope)
+- Approve is state transition only
+- Tool registry safety metadata is backend-authoritative

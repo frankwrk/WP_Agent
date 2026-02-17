@@ -1,28 +1,43 @@
 # Acceptance Tests
 
-## M1 E2E (existing)
+## M2 Regression Coverage
 
-- Pair installation
-- Signed request verification
-- Idempotency and rate limit behavior
+- Pairing and signed request behavior (M1)
+- Sessions/chat auth + scope + budget checks
+- Session context snapshot reuse
 
-## M2 Backend E2E
+## M3 Backend Unit
 
-- `POST /api/v1/sessions` rejects missing/invalid bootstrap header.
-- `POST /api/v1/sessions` rejects unknown installation.
-- Session creation fetches read-only WP context once and persists snapshot.
-- `POST /api/v1/sessions/:id/messages` uses cached context and persists user+assistant messages.
-- Daily token cap returns deterministic `BUDGET_EXCEEDED`.
+- `skill.normalize.test.ts`
+  - SkillSpec normalization with provenance
+  - invalid schema rejection
+- `plan.parse.test.ts`
+  - strict single JSON block parsing
+  - multi-block and prose rejection
+- `plan.validate.test.ts`
+  - schema/tool/allowlist validation
+  - gating issue generation
+- `estimate.test.ts`
+  - deterministic estimate/risk
+  - cost cap gating
 
-## M2 WP/API checks
+## M3 Backend E2E
 
-- Signed backend calls can access read-only tool endpoints.
-- Admin-authenticated calls can access read-only tool endpoints.
-- `content.inventory` defaults to `post,page` with summary + paginated sample data.
-- `seo.get_config` normalizes provider output for `none`, Yoast, and Rank Math.
+- `skills.sync.test.ts`
+  - bootstrap auth enforcement
+  - successful sync persistence
+  - unknown tool rejection
+  - commit pin requirement
+- `plans.draft.test.ts`
+  - draft persists plan + events
+  - scoped plan retrieval
+- `plans.approve.test.ts`
+  - `validated -> approved` only
+  - no second approve allowed
 
-## M2 UI smoke checks
+## M3 WP/UI Smoke
 
-- Connect page renders status and triggers pairing.
-- Chat page can select policy preset and load current session.
-- Chat page can send messages and render assistant responses.
+- WP admin proxy endpoints require capability + nonce
+- Skills page loads catalog and filters
+- Plan draft from selected skill renders steps/estimate/risk/issues
+- Approve action updates status and event timeline

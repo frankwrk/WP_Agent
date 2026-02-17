@@ -1,69 +1,62 @@
-## SkillSpec Canonical Schema v1
+# Skill Spec v1 (M3)
 
-```
-ts
-type SkillSpecV1 = {
-  skill_id: string
-  version: string
-  source: {
-    repo: string
-    commit_sha: string
-    path: string
-  }
-  description: string
-  tags: string[]
-  inputs_schema: JSONSchema
-  outputs_schema: JSONSchema
-  tool_allowlist: string[]
-  caps: {
-    max_pages?: number
-    max_tool_calls?: number
-  }
-  safety_class: "read" | "write_draft" | "write_publish"
-  deprecated?: boolean
-}
-```
+## Purpose
 
-## Repo Ingestion & Provenance
+M3 introduces a persisted skill registry per installation, sourced from a pinned repo commit.
 
-Document:
-	•	commit pinning required
-	•	ingestion hash stored
-	•	re-ingest requires new version
-	•	no “floating HEAD” ingestion allowed
+## Canonical Shape
 
-## Skill ↔ Tool Binding
+`SkillSpecV1` is normalized by backend ingest before storage.
 
-State clearly:
-	•	Every skill must declare allowed tools.
-	•	If skill references unknown tool → ingestion fails.
-	•	Plan validation enforces:
-	•	tool exists
-	•	tool in allowlist
-	•	tool safety class compatible with policy
+Required fields:
 
+- `skill_id`
+- `version`
+- `source{ repo, commit_sha, path }`
+- `name`
+- `description`
+- `tags[]`
+- `inputs_schema{}`
+- `outputs_schema{}`
+- `tool_allowlist[]`
+- `caps{ max_pages?, max_tool_calls?, max_steps?, max_cost_usd? }`
+- `safety_class` (`read | write_draft | write_publish`)
+- `deprecated` (optional, default false)
 
-## Backend Implementation
+## Ingestion Flow
 
-apps/backend/src/services/skills/
-ingest.github.ts
-normalize.ts
-store.ts
+Endpoint: `POST /api/v1/skills/sync`
 
-Skill Runtime Enforcement
+Input:
 
-apps/backend/src/services/policy/enforcement.ts
+- `installation_id`
+- `repo_url`
+- `commit_sha` (pin required)
 
-Shared Types
+Behavior:
 
-packages/shared/src/types/skill.ts
+- fetch pinned repo snapshot
+- load `skills/**.json`
+- normalize each spec to canonical v1
+- validate tool allowlist against backend static tool registry
+- persist provenance (`source_repo`, `source_commit_sha`, `source_path`) and ingestion record
 
-### **MUST**
+Machine failures include:
 
-- SkillSpec normalized before use
-- Tool allowlist enforced
-- Per-skill caps enforced
+- `SKILL_COMMIT_REQUIRED`
+- `SKILL_SCHEMA_INVALID`
+- `SKILL_UNKNOWN_TOOL`
 
-See:
-- 02-tool-api.md (Tool Registry v1)
-- 05-abuse-prevention.md (Estimation + caps)
+## Query APIs
+
+- `GET /api/v1/skills` (filters: `tag`, `safety_class`, `deprecated`, `search`, `limit`, `offset`)
+- `GET /api/v1/skills/:skillId`
+
+## Plan-Time Enforcement
+
+During plan draft validation:
+
+- tool must exist in static backend tool registry
+- tool must be in skill allowlist
+- tool must be available in installation WP manifest
+- skill caps participate in plan gating

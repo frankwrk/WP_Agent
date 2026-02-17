@@ -1,3 +1,5 @@
+export type ToolSafetyClass = "read" | "write_draft" | "write_publish";
+
 export interface ToolDefinition {
   name: string;
   description: string;
@@ -6,6 +8,8 @@ export interface ToolDefinition {
   readOnly: boolean;
   inputSchema?: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;
+  safetyClass?: ToolSafetyClass;
+  costWeight?: number;
 }
 
 export interface ToolManifest {

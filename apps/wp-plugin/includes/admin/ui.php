@@ -10,6 +10,7 @@ class UI
 {
     private const MENU_CONNECT_SLUG = 'wp-agent-runtime-connect';
     private const MENU_CHAT_SLUG = 'wp-agent-runtime-chat';
+    private const MENU_SKILLS_SLUG = 'wp-agent-runtime-skills';
 
     public static function registerHooks(): void
     {
@@ -46,6 +47,15 @@ class UI
             self::MENU_CHAT_SLUG,
             [self::class, 'renderChatPage']
         );
+
+        add_submenu_page(
+            self::MENU_CONNECT_SLUG,
+            'Skills',
+            'Skills',
+            'manage_options',
+            self::MENU_SKILLS_SLUG,
+            [self::class, 'renderSkillsPage']
+        );
     }
 
     public static function enqueueAssets(string $hookSuffix): void
@@ -53,6 +63,7 @@ class UI
         $allowedHooks = [
             'toplevel_page_' . self::MENU_CONNECT_SLUG,
             'wp-agent_page_' . self::MENU_CHAT_SLUG,
+            'wp-agent_page_' . self::MENU_SKILLS_SLUG,
         ];
 
         if (!in_array($hookSuffix, $allowedHooks, true)) {
@@ -96,6 +107,11 @@ class UI
         self::renderShell('chat');
     }
 
+    public static function renderSkillsPage(): void
+    {
+        self::renderShell('skills');
+    }
+
     private static function renderShell(string $page): void
     {
         echo '<div class="wrap">';
@@ -108,6 +124,10 @@ class UI
         $page = isset($_GET['page']) ? sanitize_key((string) $_GET['page']) : self::MENU_CONNECT_SLUG;
         if ($page === self::MENU_CHAT_SLUG) {
             return 'chat';
+        }
+
+        if ($page === self::MENU_SKILLS_SLUG) {
+            return 'skills';
         }
 
         return 'connect';
