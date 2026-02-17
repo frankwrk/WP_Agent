@@ -1,6 +1,18 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.PRODUCTION_REQUIRED_ENV = void 0;
 exports.getConfig = getConfig;
+exports.validateProductionBootConfig = validateProductionBootConfig;
+exports.assertProductionDatabaseConfigured = assertProductionDatabaseConfigured;
+const PRODUCTION_REQUIRED_ENV = [
+    "DATABASE_URL",
+    "PAIRING_BOOTSTRAP_SECRET",
+    "BACKEND_SIGNING_PRIVATE_KEY",
+    "BACKEND_SIGNING_AUDIENCE",
+    "SIGNATURE_TTL_SECONDS",
+    "SIGNATURE_MAX_SKEW_SECONDS",
+];
+exports.PRODUCTION_REQUIRED_ENV = PRODUCTION_REQUIRED_ENV;
 function intFromEnv(name, fallback) {
     const raw = process.env[name];
     if (!raw) {
@@ -53,5 +65,30 @@ function getConfig() {
         runMaxPagesPerBulk: intFromEnv("RUN_MAX_PAGES_PER_BULK", 50),
         runJobPollIntervalMs: intFromEnv("RUN_JOB_POLL_INTERVAL_MS", 1500),
         runJobPollAttempts: intFromEnv("RUN_JOB_POLL_ATTEMPTS", 60),
+        runRecoveryStaleMinutes: intFromEnv("RUN_RECOVERY_STALE_MINUTES", 15),
+        runWorkerPollIntervalMs: intFromEnv("RUN_WORKER_POLL_INTERVAL_MS", 1000),
+        skillsSyncTimeoutMs: intFromEnv("SKILLS_SYNC_TIMEOUT_MS", 20000),
+        skillsSyncMaxDocuments: intFromEnv("SKILLS_SYNC_MAX_DOCUMENTS", 200),
+        planDraftLlmTimeoutMs: intFromEnv("PLAN_DRAFT_LLM_TIMEOUT_MS", 25000),
+        planDraftManifestTimeoutMs: intFromEnv("PLAN_DRAFT_MANIFEST_TIMEOUT_MS", 10000),
+        planDraftMaxOutputChars: intFromEnv("PLAN_DRAFT_MAX_OUTPUT_CHARS", 30000),
     };
+}
+function validateProductionBootConfig(config) {
+    if (process.env.NODE_ENV !== "production") {
+        return;
+    }
+    const missing = PRODUCTION_REQUIRED_ENV.filter((name) => {
+        const raw = process.env[name];
+        return typeof raw !== "string" || raw.trim().length === 0;
+    });
+    if (missing.length === 0) {
+        return;
+    }
+    throw new Error(`Fatal config error: missing required production env var(s): ${missing.join(", ")}.`);
+}
+function assertProductionDatabaseConfigured(config) {
+    if (process.env.NODE_ENV === "production" && !config.databaseUrl) {
+        throw new Error("Fatal config error: DATABASE_URL is required in production; memory stores are disabled.");
+    }
 }

@@ -1,7 +1,7 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { Pool } from "pg";
-import { getConfig, type AppConfig } from "../config";
+import { assertProductionDatabaseConfigured, getConfig, type AppConfig } from "../config";
 import {
   enforceDailyBudget,
   enforceMessageInputLimit,
@@ -557,6 +557,7 @@ export interface SessionsRouteOptions {
 let cachedPool: Pool | null = null;
 
 function createStore(config: AppConfig): SessionsStore {
+  assertProductionDatabaseConfigured(config);
   if (!config.databaseUrl) {
     return new MemorySessionsStore();
   }
@@ -566,17 +567,6 @@ function createStore(config: AppConfig): SessionsStore {
   }
 
   return new PostgresSessionsStore(cachedPool);
-}
-
-function constantTimeEqual(a: string, b: string): boolean {
-  const left = Buffer.from(a);
-  const right = Buffer.from(b);
-
-  if (left.length !== right.length) {
-    return false;
-  }
-
-  return timingSafeEqual(left, right);
 }
 
 function isValidUuid(value: string): boolean {
@@ -600,8 +590,6 @@ function errorResponse(code: string, message: string, details?: Record<string, u
 
 function validateSessionCreatePayload(raw: unknown): {
   value?: {
-    installationId: string;
-    wpUserId: number;
     policyPreset: PolicyPreset;
   };
   error?: string;
@@ -611,17 +599,7 @@ function validateSessionCreatePayload(raw: unknown): {
   }
 
   const body = raw as Record<string, unknown>;
-  const installationId = String(body.installation_id ?? "").trim();
-  const wpUserId = Number.parseInt(String(body.wp_user_id ?? ""), 10);
   const preset = String(body.policy_preset ?? "balanced").trim().toLowerCase();
-
-  if (!isValidUuid(installationId)) {
-    return { error: "installation_id must be a valid UUID" };
-  }
-
-  if (!Number.isInteger(wpUserId) || wpUserId <= 0) {
-    return { error: "wp_user_id must be a positive integer" };
-  }
 
   if (!isPolicyPreset(preset)) {
     return { error: "policy_preset must be one of fast, balanced, quality, reasoning" };
@@ -629,8 +607,6 @@ function validateSessionCreatePayload(raw: unknown): {
 
   return {
     value: {
-      installationId,
-      wpUserId,
       policyPreset: preset,
     },
   };
@@ -638,8 +614,6 @@ function validateSessionCreatePayload(raw: unknown): {
 
 function validateSessionMessagePayload(raw: unknown): {
   value?: {
-    installationId: string;
-    wpUserId: number;
     content: string;
     modelPreference: ReturnType<typeof parseModelPreference>;
   };
@@ -650,18 +624,8 @@ function validateSessionMessagePayload(raw: unknown): {
   }
 
   const body = raw as Record<string, unknown>;
-  const installationId = String(body.installation_id ?? "").trim();
-  const wpUserId = Number.parseInt(String(body.wp_user_id ?? ""), 10);
   const content = String(body.content ?? "").trim();
   const modelPreference = parseModelPreference(body.model_preference);
-
-  if (!isValidUuid(installationId)) {
-    return { error: "installation_id must be a valid UUID" };
-  }
-
-  if (!Number.isInteger(wpUserId) || wpUserId <= 0) {
-    return { error: "wp_user_id must be a positive integer" };
-  }
 
   if (!content) {
     return { error: "content is required" };
@@ -669,33 +633,33 @@ function validateSessionMessagePayload(raw: unknown): {
 
   return {
     value: {
-      installationId,
-      wpUserId,
       content,
       modelPreference,
     },
   };
 }
 
+function getRequestScope(request: { installationId?: string; wpUserId?: number }): {
+  value?: { installationId: string; wpUserId: number };
+  error?: string;
+} {
+  const installationId = request.installationId;
+  const wpUserId = request.wpUserId;
+
+  if (!installationId || !isValidUuid(installationId)) {
+    return { error: "installation_id must be a valid UUID" };
+  }
+
+  if (typeof wpUserId !== "number" || !Number.isInteger(wpUserId) || wpUserId <= 0) {
+    return { error: "wp_user_id must be a positive integer" };
+  }
+
+  return { value: { installationId, wpUserId } };
+}
+
 function parsePreferenceHeader(rawHeader: string | string[] | undefined) {
   const value = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
   return parseModelPreference(value);
-}
-
-function validateBootstrapHeader(
-  rawHeader: string | string[] | undefined,
-  config: AppConfig,
-): boolean {
-  if (!config.pairingBootstrapSecret) {
-    return false;
-  }
-
-  const header = Array.isArray(rawHeader) ? rawHeader[0] ?? "" : String(rawHeader ?? "");
-  if (!header) {
-    return false;
-  }
-
-  return constantTimeEqual(header, config.pairingBootstrapSecret);
 }
 
 function toPolicyViolationResponse(violation: PolicyViolation) {
@@ -765,12 +729,13 @@ export async function sessionsRoutes(app: FastifyInstance, options: SessionsRout
   const llmClient = options.llmClient ?? new AiGatewayClient();
   const contextLoader = options.contextLoader ?? new WpSessionContextLoader(config);
   const policyMap = buildPolicyMap(config);
-
   app.post("/sessions", async (request, reply) => {
-    if (!validateBootstrapHeader(request.headers["x-wp-agent-bootstrap"], config)) {
+
+    const scope = getRequestScope(request);
+    if (!scope.value) {
       return reply
-        .code(401)
-        .send(errorResponse("SESSION_AUTH_FAILED", "Invalid bootstrap authentication header"));
+        .code(400)
+        .send(errorResponse("VALIDATION_ERROR", scope.error ?? "Invalid scope"));
     }
 
     const validated = validateSessionCreatePayload(request.body);
@@ -780,7 +745,8 @@ export async function sessionsRoutes(app: FastifyInstance, options: SessionsRout
         .send(errorResponse("VALIDATION_ERROR", validated.error ?? "Invalid payload"));
     }
 
-    const { installationId, wpUserId, policyPreset } = validated.value;
+    const { installationId, wpUserId } = scope.value;
+    const { policyPreset } = validated.value;
 
     const paired = await store.isPairedInstallation(installationId);
     if (!paired) {
@@ -839,20 +805,8 @@ export async function sessionsRoutes(app: FastifyInstance, options: SessionsRout
   });
 
   app.get("/sessions/:sessionId", async (request, reply) => {
-    if (!validateBootstrapHeader(request.headers["x-wp-agent-bootstrap"], config)) {
-      return reply
-        .code(401)
-        .send(errorResponse("SESSION_AUTH_FAILED", "Invalid bootstrap authentication header"));
-    }
 
     const sessionId = String((request.params as { sessionId?: string }).sessionId ?? "").trim();
-    const installationId = String(
-      (request.query as Record<string, unknown>)?.installation_id ?? "",
-    ).trim();
-    const wpUserId = Number.parseInt(
-      String((request.query as Record<string, unknown>)?.wp_user_id ?? ""),
-      10,
-    );
 
     if (!sessionId || !isValidUuid(sessionId)) {
       return reply
@@ -860,10 +814,11 @@ export async function sessionsRoutes(app: FastifyInstance, options: SessionsRout
         .send(errorResponse("VALIDATION_ERROR", "sessionId must be a valid UUID"));
     }
 
-    if (!isValidUuid(installationId) || !Number.isInteger(wpUserId) || wpUserId <= 0) {
+    const scope = getRequestScope(request);
+    if (!scope.value) {
       return reply
         .code(400)
-        .send(errorResponse("VALIDATION_ERROR", "installation_id and wp_user_id are required"));
+        .send(errorResponse("VALIDATION_ERROR", scope.error ?? "Invalid scope"));
     }
 
     const session = await store.getSessionById(sessionId);
@@ -871,7 +826,10 @@ export async function sessionsRoutes(app: FastifyInstance, options: SessionsRout
       return reply.code(404).send(errorResponse("SESSION_NOT_FOUND", "Session not found"));
     }
 
-    if (session.installationId !== installationId || session.wpUserId !== wpUserId) {
+    if (
+      session.installationId !== scope.value.installationId
+      || session.wpUserId !== scope.value.wpUserId
+    ) {
       return reply
         .code(403)
         .send(errorResponse("SESSION_SCOPE_VIOLATION", "Session does not belong to caller scope"));
@@ -890,17 +848,19 @@ export async function sessionsRoutes(app: FastifyInstance, options: SessionsRout
   });
 
   app.post("/sessions/:sessionId/messages", async (request, reply) => {
-    if (!validateBootstrapHeader(request.headers["x-wp-agent-bootstrap"], config)) {
-      return reply
-        .code(401)
-        .send(errorResponse("SESSION_AUTH_FAILED", "Invalid bootstrap authentication header"));
-    }
 
     const sessionId = String((request.params as { sessionId?: string }).sessionId ?? "").trim();
     if (!sessionId || !isValidUuid(sessionId)) {
       return reply
         .code(400)
         .send(errorResponse("VALIDATION_ERROR", "sessionId must be a valid UUID"));
+    }
+
+    const scope = getRequestScope(request);
+    if (!scope.value) {
+      return reply
+        .code(400)
+        .send(errorResponse("VALIDATION_ERROR", scope.error ?? "Invalid scope"));
     }
 
     const validated = validateSessionMessagePayload(request.body);
@@ -915,10 +875,7 @@ export async function sessionsRoutes(app: FastifyInstance, options: SessionsRout
       return reply.code(404).send(errorResponse("SESSION_NOT_FOUND", "Session not found"));
     }
 
-    if (
-      session.installationId !== validated.value.installationId
-      || session.wpUserId !== validated.value.wpUserId
-    ) {
+    if (session.installationId !== scope.value.installationId || session.wpUserId !== scope.value.wpUserId) {
       return reply
         .code(403)
         .send(errorResponse("SESSION_SCOPE_VIOLATION", "Session does not belong to caller scope"));

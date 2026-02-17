@@ -1,15 +1,33 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.skillsRoutes = skillsRoutes;
-const node_crypto_1 = require("node:crypto");
 const pg_1 = require("pg");
 const config_1 = require("../config");
 const ingest_github_1 = require("../services/skills/ingest.github");
 const normalize_1 = require("../services/skills/normalize");
 const store_1 = require("../services/skills/store");
 const tool_registry_1 = require("../services/plans/tool.registry");
+async function withTimeout(factory, timeoutMs, timeoutMessage) {
+    let timer = null;
+    try {
+        return await Promise.race([
+            factory(),
+            new Promise((_, reject) => {
+                timer = setTimeout(() => {
+                    reject(new Error(timeoutMessage));
+                }, timeoutMs);
+            }),
+        ]);
+    }
+    finally {
+        if (timer) {
+            clearTimeout(timer);
+        }
+    }
+}
 let cachedPool = null;
 function createStore(config) {
+    (0, config_1.assertProductionDatabaseConfigured)(config);
     if (!config.databaseUrl) {
         return new store_1.MemorySkillStore();
     }
@@ -21,23 +39,11 @@ function createStore(config) {
 function isValidUuid(value) {
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
-function constantTimeEqual(a, b) {
-    const left = Buffer.from(a);
-    const right = Buffer.from(b);
-    if (left.length !== right.length) {
-        return false;
+function getRequestInstallationId(request) {
+    if (!request.installationId || !isValidUuid(request.installationId)) {
+        return { error: "installation_id must be a valid UUID" };
     }
-    return (0, node_crypto_1.timingSafeEqual)(left, right);
-}
-function validateBootstrapHeader(rawHeader, config) {
-    if (!config.pairingBootstrapSecret) {
-        return false;
-    }
-    const header = Array.isArray(rawHeader) ? rawHeader[0] ?? "" : String(rawHeader ?? "");
-    if (!header) {
-        return false;
-    }
-    return constantTimeEqual(header, config.pairingBootstrapSecret);
+    return { value: request.installationId };
 }
 function errorResponse(code, message, details) {
     return {
@@ -81,22 +87,26 @@ async function skillsRoutes(app, options = {}) {
     const store = options.store ?? createStore(config);
     const ingestSnapshot = options.ingestSnapshot ?? ingest_github_1.ingestPinnedSkillSnapshot;
     app.post("/skills/sync", async (request, reply) => {
-        if (!validateBootstrapHeader(request.headers["x-wp-agent-bootstrap"], config)) {
-            return reply
-                .code(401)
-                .send(errorResponse("SKILLS_AUTH_FAILED", "Invalid bootstrap authentication header"));
-        }
+        const startedAtMs = Date.now();
+        const progress = [];
+        const trackStage = async (stage, fn) => {
+            const stageStarted = Date.now();
+            const result = await fn();
+            progress.push({ stage, duration_ms: Date.now() - stageStarted });
+            return result;
+        };
         const body = (request.body && typeof request.body === "object"
             ? request.body
             : {});
-        const installationId = String(body.installation_id ?? "").trim();
-        const repoUrl = String(body.repo_url ?? config.skillSourceRepoUrl ?? "").trim();
-        const commitSha = String(body.commit_sha ?? config.skillSourceCommitSha ?? "").trim();
-        if (!isValidUuid(installationId)) {
+        const scope = getRequestInstallationId(request);
+        if (!scope.value) {
             return reply
                 .code(400)
-                .send(errorResponse("VALIDATION_ERROR", "installation_id must be a valid UUID"));
+                .send(errorResponse("VALIDATION_ERROR", scope.error ?? "Invalid scope"));
         }
+        const installationId = scope.value;
+        const repoUrl = String(body.repo_url ?? config.skillSourceRepoUrl ?? "").trim();
+        const commitSha = String(body.commit_sha ?? config.skillSourceCommitSha ?? "").trim();
         if (!repoUrl || !commitSha) {
             return reply.code(400).send(errorResponse("VALIDATION_ERROR", "repo_url and commit_sha are required (or configure defaults)"));
         }
@@ -107,8 +117,11 @@ async function skillsRoutes(app, options = {}) {
         }
         let ingestionId = null;
         try {
-            const snapshot = await ingestSnapshot({ repoUrl, commitSha });
-            const specs = snapshot.documents.map((doc) => {
+            const snapshot = await trackStage("ingest_snapshot", () => withTimeout(() => ingestSnapshot({ repoUrl, commitSha }), Math.max(500, config.skillsSyncTimeoutMs), "skills sync ingest timed out"));
+            if (snapshot.documents.length > config.skillsSyncMaxDocuments) {
+                return reply.code(400).send(errorResponse("SKILL_SYNC_CAP_EXCEEDED", `Skill document count exceeds cap (${config.skillsSyncMaxDocuments})`));
+            }
+            const specs = await trackStage("normalize_specs", async () => snapshot.documents.map((doc) => {
                 const parsed = JSON.parse(doc.content);
                 const normalized = (0, normalize_1.normalizeSkillSpec)(parsed, {
                     repoUrl: snapshot.repoUrl,
@@ -117,7 +130,7 @@ async function skillsRoutes(app, options = {}) {
                 });
                 (0, tool_registry_1.assertKnownToolNames)(normalized.toolAllowlist);
                 return normalized;
-            });
+            }));
             const latest = await store.getLatestSuccessfulIngestion(installationId);
             if (latest && latest.ingestionHash === snapshot.ingestionHash) {
                 const skillCount = await store.countActiveSkills(installationId);
@@ -133,29 +146,33 @@ async function skillsRoutes(app, options = {}) {
                         skill_count: skillCount,
                     },
                     error: null,
-                    meta: null,
+                    meta: {
+                        progress,
+                        elapsed_ms: Date.now() - startedAtMs,
+                    },
                 });
             }
-            const ingestion = await store.createIngestion({
+            const ingestion = await trackStage("create_ingestion", () => store.createIngestion({
                 installationId,
                 repoUrl: snapshot.repoUrl,
                 commitSha: snapshot.commitSha,
                 ingestionHash: snapshot.ingestionHash,
-            });
-            ingestionId = ingestion.ingestionId;
-            await store.replaceSkillSpecs({
+            }));
+            const createdIngestionId = ingestion.ingestionId;
+            ingestionId = createdIngestionId;
+            await trackStage("replace_skill_specs", () => store.replaceSkillSpecs({
                 installationId,
-                ingestionId,
+                ingestionId: createdIngestionId,
                 specs,
-            });
-            await store.updateIngestionStatus({
-                ingestionId,
+            }));
+            await trackStage("mark_ingestion_succeeded", () => store.updateIngestionStatus({
+                ingestionId: createdIngestionId,
                 status: "succeeded",
-            });
+            }));
             return reply.code(200).send({
                 ok: true,
                 data: {
-                    ingestion_id: ingestionId,
+                    ingestion_id: createdIngestionId,
                     installation_id: installationId,
                     status: "succeeded",
                     repo_url: snapshot.repoUrl,
@@ -164,7 +181,10 @@ async function skillsRoutes(app, options = {}) {
                     skill_count: specs.length,
                 },
                 error: null,
-                meta: null,
+                meta: {
+                    progress,
+                    elapsed_ms: Date.now() - startedAtMs,
+                },
             });
         }
         catch (error) {
@@ -180,6 +200,11 @@ async function skillsRoutes(app, options = {}) {
                 || error instanceof tool_registry_1.ToolRegistryError) {
                 return reply.code(400).send(errorResponse(error.code, error.message));
             }
+            if (error instanceof Error && error.message === "skills sync ingest timed out") {
+                return reply
+                    .code(504)
+                    .send(errorResponse("SKILL_SYNC_TIMEOUT", "Skills sync ingest timed out"));
+            }
             request.log.error({ error }, "skills sync failed");
             return reply
                 .code(500)
@@ -187,18 +212,14 @@ async function skillsRoutes(app, options = {}) {
         }
     });
     app.get("/skills", async (request, reply) => {
-        if (!validateBootstrapHeader(request.headers["x-wp-agent-bootstrap"], config)) {
-            return reply
-                .code(401)
-                .send(errorResponse("SKILLS_AUTH_FAILED", "Invalid bootstrap authentication header"));
-        }
-        const query = request.query;
-        const installationId = String(query.installation_id ?? "").trim();
-        if (!isValidUuid(installationId)) {
+        const scope = getRequestInstallationId(request);
+        if (!scope.value) {
             return reply
                 .code(400)
-                .send(errorResponse("VALIDATION_ERROR", "installation_id must be a valid UUID"));
+                .send(errorResponse("VALIDATION_ERROR", scope.error ?? "Invalid scope"));
         }
+        const query = request.query;
+        const installationId = scope.value;
         const limit = Math.max(1, Math.min(100, Number.parseInt(String(query.limit ?? "20"), 10) || 20));
         const offset = Math.max(0, Number.parseInt(String(query.offset ?? "0"), 10) || 0);
         const result = await store.listSkills({
@@ -243,20 +264,15 @@ async function skillsRoutes(app, options = {}) {
         });
     });
     app.get("/skills/:skillId", async (request, reply) => {
-        if (!validateBootstrapHeader(request.headers["x-wp-agent-bootstrap"], config)) {
-            return reply
-                .code(401)
-                .send(errorResponse("SKILLS_AUTH_FAILED", "Invalid bootstrap authentication header"));
-        }
         const params = request.params;
-        const query = request.query;
-        const installationId = String(query.installation_id ?? "").trim();
-        const skillId = String(params.skillId ?? "").trim();
-        if (!isValidUuid(installationId)) {
+        const scope = getRequestInstallationId(request);
+        if (!scope.value) {
             return reply
                 .code(400)
-                .send(errorResponse("VALIDATION_ERROR", "installation_id must be a valid UUID"));
+                .send(errorResponse("VALIDATION_ERROR", scope.error ?? "Invalid scope"));
         }
+        const installationId = scope.value;
+        const skillId = String(params.skillId ?? "").trim();
         if (!skillId) {
             return reply.code(400).send(errorResponse("VALIDATION_ERROR", "skillId is required"));
         }

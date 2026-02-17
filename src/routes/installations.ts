@@ -1,7 +1,7 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { Pool } from "pg";
-import { getConfig, type AppConfig } from "../config";
+import { assertProductionDatabaseConfigured, getConfig, type AppConfig } from "../config";
 import {
   derivePublicKeyFromPrivateKey,
   SIGNATURE_ALGORITHM,
@@ -256,6 +256,7 @@ export interface InstallationsRouteOptions {
 let cachedPool: Pool | null = null;
 
 function createStore(config: AppConfig): InstallationStore {
+  assertProductionDatabaseConfigured(config);
   if (!config.databaseUrl) {
     return new MemoryInstallationStore();
   }

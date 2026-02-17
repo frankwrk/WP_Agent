@@ -100,6 +100,7 @@ export interface RunStore {
   createRun(input: RunCreateInput): Promise<RunRecord>;
   getRun(runId: string): Promise<RunRecord | null>;
   getRunWithDetails(runId: string): Promise<RunWithDetails | null>;
+  claimNextQueuedRun(): Promise<RunRecord | null>;
   getActiveRunForInstallation(installationId: string): Promise<RunRecord | null>;
   setRunStatus(input: {
     runId: string;
@@ -126,6 +127,12 @@ export interface RunStore {
     startedAt?: string | null;
     finishedAt?: string | null;
   }): Promise<void>;
+  setActiveStepsFailed(input: {
+    runId: string;
+    errorCode: string;
+    errorMessage: string;
+    finishedAt: string;
+  }): Promise<void>;
   appendRunEvent(input: {
     runId: string;
     eventType: string;
@@ -147,6 +154,10 @@ export interface RunStore {
     appliedAt?: string | null;
   }): Promise<void>;
   listPendingRollbacks(runId: string): Promise<RunRollbackRecord[]>;
+  listStaleActiveRuns(input: {
+    cutoffIso: string;
+    limit?: number;
+  }): Promise<RunRecord[]>;
 }
 
 export class MemoryRunStore implements RunStore {
@@ -222,6 +233,26 @@ export class MemoryRunStore implements RunStore {
       events: [...(this.events.get(runId) ?? [])],
       rollbacks: [...(this.rollbacks.get(runId) ?? [])],
     };
+  }
+
+  async claimNextQueuedRun(): Promise<RunRecord | null> {
+    const now = new Date().toISOString();
+    const queued = [...this.runs.values()]
+      .filter((run) => run.status === "queued")
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
+
+    if (!queued) {
+      return null;
+    }
+
+    const claimed: RunRecord = {
+      ...queued,
+      status: "running",
+      startedAt: queued.startedAt ?? now,
+      updatedAt: now,
+    };
+    this.runs.set(claimed.runId, claimed);
+    return claimed;
   }
 
   async getActiveRunForInstallation(installationId: string): Promise<RunRecord | null> {
@@ -330,6 +361,33 @@ export class MemoryRunStore implements RunStore {
     this.steps.set(input.runId, steps);
   }
 
+  async setActiveStepsFailed(input: {
+    runId: string;
+    errorCode: string;
+    errorMessage: string;
+    finishedAt: string;
+  }): Promise<void> {
+    const steps = this.steps.get(input.runId) ?? [];
+    const now = new Date().toISOString();
+
+    for (let i = 0; i < steps.length; i += 1) {
+      if (steps[i].status !== "queued" && steps[i].status !== "running") {
+        continue;
+      }
+
+      steps[i] = {
+        ...steps[i],
+        status: "failed",
+        errorCode: input.errorCode,
+        errorMessage: input.errorMessage,
+        finishedAt: input.finishedAt,
+        updatedAt: now,
+      };
+    }
+
+    this.steps.set(input.runId, steps);
+  }
+
   async appendRunEvent(input: {
     runId: string;
     eventType: string;
@@ -410,6 +468,20 @@ export class MemoryRunStore implements RunStore {
   async listPendingRollbacks(runId: string): Promise<RunRollbackRecord[]> {
     const list = this.rollbacks.get(runId) ?? [];
     return list.filter((item) => item.status === "pending");
+  }
+
+  async listStaleActiveRuns(input: { cutoffIso: string; limit?: number }): Promise<RunRecord[]> {
+    const cutoff = new Date(input.cutoffIso).getTime();
+    const limit = Math.max(1, input.limit ?? 200);
+
+    return [...this.runs.values()]
+      .filter((run) => run.status === "queued" || run.status === "running" || run.status === "rolling_back")
+      .filter((run) => {
+        const candidate = run.startedAt ?? run.createdAt;
+        return new Date(candidate).getTime() < cutoff;
+      })
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .slice(0, limit);
   }
 }
 
@@ -704,6 +776,63 @@ export class PostgresRunStore implements RunStore {
     };
   }
 
+  async claimNextQueuedRun(): Promise<RunRecord | null> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query<RunRow>(
+        `
+          WITH candidate AS (
+            SELECT run_id
+            FROM runs
+            WHERE status = 'queued'
+            ORDER BY created_at ASC
+            FOR UPDATE SKIP LOCKED
+            LIMIT 1
+          )
+          UPDATE runs AS r
+          SET
+            status = 'running',
+            started_at = COALESCE(r.started_at, NOW()),
+            updated_at = NOW()
+          FROM candidate
+          WHERE r.run_id = candidate.run_id
+          RETURNING
+            r.run_id,
+            r.installation_id,
+            r.wp_user_id,
+            r.plan_id,
+            r.status,
+            r.planned_steps,
+            r.planned_tool_calls,
+            r.planned_pages,
+            r.actual_tool_calls,
+            r.actual_pages,
+            r.error_code,
+            r.error_message,
+            r.rollback_available,
+            r.input_payload,
+            r.created_at,
+            r.updated_at,
+            r.started_at,
+            r.finished_at
+        `,
+      );
+      await client.query("COMMIT");
+
+      if (!result.rowCount) {
+        return null;
+      }
+
+      return mapRunRow(result.rows[0]);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async getActiveRunForInstallation(installationId: string): Promise<RunRecord | null> {
     const result = await this.pool.query<RunRow>(
       `
@@ -880,6 +1009,28 @@ export class PostgresRunStore implements RunStore {
     );
   }
 
+  async setActiveStepsFailed(input: {
+    runId: string;
+    errorCode: string;
+    errorMessage: string;
+    finishedAt: string;
+  }): Promise<void> {
+    await this.pool.query(
+      `
+        UPDATE run_steps
+        SET
+          status = 'failed',
+          error_code = $2,
+          error_message = $3,
+          finished_at = $4::timestamptz,
+          updated_at = NOW()
+        WHERE run_id = $1
+          AND status IN ('queued', 'running')
+      `,
+      [input.runId, input.errorCode, input.errorMessage, input.finishedAt],
+    );
+  }
+
   async appendRunEvent(input: {
     runId: string;
     eventType: string;
@@ -1011,5 +1162,43 @@ export class PostgresRunStore implements RunStore {
       updatedAt: row.updated_at,
       appliedAt: row.applied_at,
     }));
+  }
+
+  async listStaleActiveRuns(input: {
+    cutoffIso: string;
+    limit?: number;
+  }): Promise<RunRecord[]> {
+    const limit = Math.max(1, input.limit ?? 200);
+    const result = await this.pool.query<RunRow>(
+      `
+        SELECT
+          run_id,
+          installation_id,
+          wp_user_id,
+          plan_id,
+          status,
+          planned_steps,
+          planned_tool_calls,
+          planned_pages,
+          actual_tool_calls,
+          actual_pages,
+          error_code,
+          error_message,
+          rollback_available,
+          input_payload,
+          created_at,
+          updated_at,
+          started_at,
+          finished_at
+        FROM runs
+        WHERE status IN ('queued', 'running', 'rolling_back')
+          AND COALESCE(started_at, created_at) < $1::timestamptz
+        ORDER BY created_at ASC
+        LIMIT $2
+      `,
+      [input.cutoffIso, limit],
+    );
+
+    return result.rows.map((row) => mapRunRow(row));
   }
 }
