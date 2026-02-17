@@ -1,7 +1,7 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { Pool } from "pg";
-import { getConfig, type AppConfig } from "../config";
+import { assertProductionDatabaseConfigured, getConfig, type AppConfig } from "../config";
 import {
   enforceDailyBudget,
   enforceRateLimit,
@@ -50,6 +50,8 @@ import {
   type RunRecord,
 } from "../services/runs/store";
 import { RunExecutor } from "../services/runs/executor";
+import { recoverStaleActiveRuns } from "../services/runs/recovery";
+import { startRunWorker, type RunWorkerHandle } from "../services/runs/worker";
 import { mapRunExecutionInput, RunInputError } from "../services/runs/input.mapper";
 import { fetchToolManifest } from "../services/wp/tool.manifest";
 import { buildPlannerMessages } from "../services/plans/planner.prompt";
@@ -62,6 +64,7 @@ export interface RunsRouteOptions {
   skillStore?: SkillStore;
   runStore?: RunStore;
   runExecutor?: RunExecutor;
+  runWorker?: RunWorkerHandle;
   llmClient?: LlmClient;
   manifestToolsLoader?: (installationId: string) => Promise<Set<string>>;
 }
@@ -81,6 +84,7 @@ function getPool(config: AppConfig): Pool | null {
 }
 
 function createPlanStore(config: AppConfig): PlanStore {
+  assertProductionDatabaseConfigured(config);
   const pool = getPool(config);
   if (!pool) {
     return new MemoryPlanStore();
@@ -90,6 +94,7 @@ function createPlanStore(config: AppConfig): PlanStore {
 }
 
 function createSkillStore(config: AppConfig): SkillStore {
+  assertProductionDatabaseConfigured(config);
   const pool = getPool(config);
   if (!pool) {
     return new MemorySkillStore();
@@ -99,39 +104,13 @@ function createSkillStore(config: AppConfig): SkillStore {
 }
 
 function createRunStore(config: AppConfig): RunStore {
+  assertProductionDatabaseConfigured(config);
   const pool = getPool(config);
   if (!pool) {
     return new MemoryRunStore();
   }
 
   return new PostgresRunStore(pool);
-}
-
-function constantTimeEqual(a: string, b: string): boolean {
-  const left = Buffer.from(a);
-  const right = Buffer.from(b);
-
-  if (left.length !== right.length) {
-    return false;
-  }
-
-  return timingSafeEqual(left, right);
-}
-
-function validateBootstrapHeader(
-  rawHeader: string | string[] | undefined,
-  config: AppConfig,
-): boolean {
-  if (!config.pairingBootstrapSecret) {
-    return false;
-  }
-
-  const header = Array.isArray(rawHeader) ? rawHeader[0] ?? "" : String(rawHeader ?? "");
-  if (!header) {
-    return false;
-  }
-
-  return constantTimeEqual(header, config.pairingBootstrapSecret);
 }
 
 function isValidUuid(value: string): boolean {
@@ -225,8 +204,6 @@ function toApiRun(record: RunRecord): Record<string, unknown> {
 
 function parseRunCreatePayload(raw: unknown): {
   value?: {
-    installationId: string;
-    wpUserId: number;
     planId: string;
   };
   error?: string;
@@ -236,17 +213,7 @@ function parseRunCreatePayload(raw: unknown): {
   }
 
   const body = raw as Record<string, unknown>;
-  const installationId = String(body.installation_id ?? "").trim();
-  const wpUserId = Number.parseInt(String(body.wp_user_id ?? ""), 10);
   const planId = String(body.plan_id ?? "").trim();
-
-  if (!isValidUuid(installationId)) {
-    return { error: "installation_id must be a valid UUID" };
-  }
-
-  if (!Number.isInteger(wpUserId) || wpUserId <= 0) {
-    return { error: "wp_user_id must be a positive integer" };
-  }
 
   if (!isValidUuid(planId)) {
     return { error: "plan_id must be a valid UUID" };
@@ -254,8 +221,6 @@ function parseRunCreatePayload(raw: unknown): {
 
   return {
     value: {
-      installationId,
-      wpUserId,
       planId,
     },
   };
@@ -263,8 +228,6 @@ function parseRunCreatePayload(raw: unknown): {
 
 function parseDraftPayload(raw: unknown): {
   value?: {
-    installationId: string;
-    wpUserId: number;
     policyPreset: PolicyPreset;
     modelPreference: ReturnType<typeof parseModelPreference>;
     skillId: string;
@@ -278,21 +241,11 @@ function parseDraftPayload(raw: unknown): {
   }
 
   const body = raw as Record<string, unknown>;
-  const installationId = String(body.installation_id ?? "").trim();
-  const wpUserId = Number.parseInt(String(body.wp_user_id ?? ""), 10);
   const policyPreset = String(body.policy_preset ?? "balanced").trim().toLowerCase();
   const modelPreference = parseModelPreference(body.model_preference);
   const skillId = String(body.skill_id ?? "").trim();
   const goal = String(body.goal ?? "").trim();
   const inputs = body.inputs;
-
-  if (!isValidUuid(installationId)) {
-    return { error: "installation_id must be a valid UUID" };
-  }
-
-  if (!Number.isInteger(wpUserId) || wpUserId <= 0) {
-    return { error: "wp_user_id must be a positive integer" };
-  }
 
   if (!isPolicyPreset(policyPreset)) {
     return { error: "policy_preset must be one of fast, balanced, quality, reasoning" };
@@ -312,8 +265,6 @@ function parseDraftPayload(raw: unknown): {
 
   return {
     value: {
-      installationId,
-      wpUserId,
       policyPreset,
       modelPreference,
       skillId,
@@ -323,71 +274,49 @@ function parseDraftPayload(raw: unknown): {
   };
 }
 
-function parsePlanScopePayload(raw: unknown): {
-  value?: {
-    installationId: string;
-    wpUserId: number;
-  };
+function getRequestScope(request: { installationId?: string; wpUserId?: number }): {
+  value?: { installationId: string; wpUserId: number };
   error?: string;
 } {
-  if (!raw || typeof raw !== "object") {
-    return { error: "Payload must be a JSON object" };
-  }
+  const installationId = request.installationId;
+  const wpUserId = request.wpUserId;
 
-  const body = raw as Record<string, unknown>;
-  const installationId = String(body.installation_id ?? "").trim();
-  const wpUserId = Number.parseInt(String(body.wp_user_id ?? ""), 10);
-
-  if (!isValidUuid(installationId)) {
+  if (!installationId || !isValidUuid(installationId)) {
     return { error: "installation_id must be a valid UUID" };
   }
 
-  if (!Number.isInteger(wpUserId) || wpUserId <= 0) {
+  if (typeof wpUserId !== "number" || !Number.isInteger(wpUserId) || wpUserId <= 0) {
     return { error: "wp_user_id must be a positive integer" };
   }
 
-  return {
-    value: {
-      installationId,
-      wpUserId,
-    },
-  };
-}
-
-function parsePlanScopeQuery(raw: unknown): {
-  value?: {
-    installationId: string;
-    wpUserId: number;
-  };
-  error?: string;
-} {
-  if (!raw || typeof raw !== "object") {
-    return { error: "Query must be provided" };
-  }
-
-  const query = raw as Record<string, unknown>;
-  const installationId = String(query.installation_id ?? "").trim();
-  const wpUserId = Number.parseInt(String(query.wp_user_id ?? ""), 10);
-
-  if (!isValidUuid(installationId)) {
-    return { error: "installation_id must be a valid UUID" };
-  }
-
-  if (!Number.isInteger(wpUserId) || wpUserId <= 0) {
-    return { error: "wp_user_id must be a positive integer" };
-  }
-
-  return {
-    value: {
-      installationId,
-      wpUserId,
-    },
-  };
+  return { value: { installationId, wpUserId } };
 }
 
 function parsePreferenceHeader(rawHeader: string | string[] | undefined) {
   const value = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
   return parseModelPreference(value);
+}
+
+async function withTimeout<T>(
+  factory: () => Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<T> {
+  let timer: NodeJS.Timeout | null = null;
+  try {
+    return await Promise.race([
+      factory(),
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(timeoutMessage));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 async function defaultManifestToolLoader(
@@ -416,14 +345,58 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
     logger: app.log,
   });
 
+  const canRecover =
+    !options.runStore
+    && !options.runExecutor
+    &&
+    typeof (runStore as Partial<RunStore>).listStaleActiveRuns === "function"
+    && typeof (runStore as Partial<RunStore>).setActiveStepsFailed === "function";
+
+  if (canRecover) {
+    try {
+      await recoverStaleActiveRuns({
+        runStore,
+        logger: app.log,
+        staleMinutes: config.runRecoveryStaleMinutes,
+      });
+    } catch (error) {
+      app.log.warn({ error }, "run recovery skipped after boot-time error");
+    }
+  } else {
+    app.log.warn("run recovery skipped: store does not support reconciliation hooks");
+  }
+
+  const runWorker =
+    options.runWorker
+    ?? startRunWorker({
+      runStore,
+      runExecutor,
+      logger: app.log,
+      pollIntervalMs: config.runWorkerPollIntervalMs,
+    });
+
+  app.addHook("onClose", async () => {
+    runWorker.stop();
+  });
+
   const policyMap = buildPolicyMap(config);
   const toolRegistry = getToolRegistry();
-
   app.post("/plans/draft", async (request, reply) => {
-    if (!validateBootstrapHeader(request.headers["x-wp-agent-bootstrap"], config)) {
+    const draftStartedMs = Date.now();
+    const progress: Array<{ stage: string; duration_ms: number }> = [];
+    const trackStage = async <T>(stage: string, fn: () => Promise<T>): Promise<T> => {
+      const stageStarted = Date.now();
+      const result = await fn();
+      progress.push({ stage, duration_ms: Date.now() - stageStarted });
+      return result;
+    };
+
+
+    const scope = getRequestScope(request);
+    if (!scope.value) {
       return reply
-        .code(401)
-        .send(errorResponse("PLANS_AUTH_FAILED", "Invalid bootstrap authentication header"));
+        .code(400)
+        .send(errorResponse("VALIDATION_ERROR", scope.error ?? "Invalid scope"));
     }
 
     const validated = parseDraftPayload(request.body);
@@ -434,8 +407,10 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
     }
 
     const payload = validated.value;
+    const installationId = scope.value.installationId;
+    const wpUserId = scope.value.wpUserId;
 
-    if (!(await planStore.isPairedInstallation(payload.installationId))) {
+    if (!(await planStore.isPairedInstallation(installationId))) {
       return reply
         .code(404)
         .send(errorResponse("INSTALLATION_NOT_PAIRED", "Installation is not paired"));
@@ -445,7 +420,7 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
 
     const rateViolation = enforceRateLimit({
       limiter: planRateLimiter,
-      key: `${payload.installationId}:${payload.wpUserId}:${payload.policyPreset}:plan`,
+      key: `${installationId}:${wpUserId}:${payload.policyPreset}:plan`,
       policy,
     });
     if (rateViolation) {
@@ -453,8 +428,8 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
     }
 
     const usedTokensToday = await planStore.sumPlanUsageTokensForDay({
-      installationId: payload.installationId,
-      wpUserId: payload.wpUserId,
+      installationId,
+      wpUserId,
       dayStartIso: getUtcDayStartIso(),
     });
 
@@ -463,7 +438,7 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
       return reply.code(budgetViolation.statusCode).send(toPolicyViolationResponse(budgetViolation));
     }
 
-    const skill = await skillStore.getSkill(payload.installationId, payload.skillId);
+    const skill = await skillStore.getSkill(installationId, payload.skillId);
     if (!skill) {
       return reply
         .code(404)
@@ -523,12 +498,18 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
     let providerRequestId: string | undefined;
 
     try {
-      const completion = await llmClient.completeChat({
-        requestId: llmRequestId,
-        model: selectedModel.model,
-        messages: plannerMessages,
-        maxTokens: 1100,
-      });
+      const completion = await trackStage("llm_completion", () =>
+        withTimeout(
+          () =>
+            llmClient.completeChat({
+              requestId: llmRequestId,
+              model: selectedModel.model,
+              messages: plannerMessages,
+              maxTokens: 1100,
+            }),
+          Math.max(500, config.planDraftLlmTimeoutMs),
+          "plan draft llm timed out",
+        ));
       llmRawOutput = completion.content;
       llmUsageTokens = completion.usageTokens;
       providerRequestId = completion.providerRequestId;
@@ -546,10 +527,27 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
         "llm request completed",
       );
     } catch (error) {
+      if (error instanceof Error && error.message === "plan draft llm timed out") {
+        return reply
+          .code(504)
+          .send(errorResponse("PLAN_LLM_TIMEOUT", "Planner model request timed out"));
+      }
+
       request.log.error({ error, requestId: request.id, llmRequestId }, "plan draft llm request failed");
       return reply
         .code(502)
         .send(errorResponse("PLAN_LLM_FAILED", "Planner model request failed"));
+    }
+
+    if (llmRawOutput.length > config.planDraftMaxOutputChars) {
+      return reply
+        .code(400)
+        .send(
+          errorResponse(
+            "PLAN_OUTPUT_CAP_EXCEEDED",
+            `Planner output exceeded max allowed characters (${config.planDraftMaxOutputChars})`,
+          ),
+        );
     }
 
     let parsedPlan: Record<string, unknown>;
@@ -567,8 +565,22 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
 
     let manifestToolNames: Set<string>;
     try {
-      manifestToolNames = await manifestToolsLoader(payload.installationId);
+      manifestToolNames = await trackStage("manifest_fetch", () =>
+        withTimeout(
+          () => manifestToolsLoader(installationId),
+          Math.max(500, config.planDraftManifestTimeoutMs),
+          "plan draft manifest fetch timed out",
+        ));
     } catch (error) {
+      if (error instanceof Error && error.message === "plan draft manifest fetch timed out") {
+        return reply.code(504).send(
+          errorResponse(
+            "PLAN_MANIFEST_TIMEOUT",
+            "Timed out while loading tool manifest for installation",
+          ),
+        );
+      }
+
       request.log.error({ error }, "plan draft manifest fetch failed");
       return reply.code(502).send(
         errorResponse(
@@ -646,8 +658,8 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
 
     const storedPlan = await planStore.createPlan({
       planId,
-      installationId: payload.installationId,
-      wpUserId: payload.wpUserId,
+      installationId,
+      wpUserId,
       skillId: canonicalPlan.skillId,
       policyPreset: payload.policyPreset,
       status,
@@ -700,24 +712,22 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
         events: events.map((event) => toApiEvent(event)),
       },
       error: null,
-      meta: null,
+      meta: {
+        progress,
+        elapsed_ms: Date.now() - draftStartedMs,
+      },
     });
   });
 
   app.get("/plans/:planId", async (request, reply) => {
-    if (!validateBootstrapHeader(request.headers["x-wp-agent-bootstrap"], config)) {
-      return reply
-        .code(401)
-        .send(errorResponse("PLANS_AUTH_FAILED", "Invalid bootstrap authentication header"));
-    }
 
     const params = request.params as { planId?: string };
-    const scope = parsePlanScopeQuery(request.query);
+    const scope = getRequestScope(request);
 
     if (!scope.value) {
       return reply
         .code(400)
-        .send(errorResponse("VALIDATION_ERROR", scope.error ?? "Invalid query"));
+        .send(errorResponse("VALIDATION_ERROR", scope.error ?? "Invalid scope"));
     }
 
     const planId = String(params.planId ?? "").trim();
@@ -750,18 +760,13 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
   });
 
   app.post("/plans/:planId/approve", async (request, reply) => {
-    if (!validateBootstrapHeader(request.headers["x-wp-agent-bootstrap"], config)) {
-      return reply
-        .code(401)
-        .send(errorResponse("PLANS_AUTH_FAILED", "Invalid bootstrap authentication header"));
-    }
 
     const params = request.params as { planId?: string };
-    const scope = parsePlanScopePayload(request.body);
+    const scope = getRequestScope(request);
     if (!scope.value) {
       return reply
         .code(400)
-        .send(errorResponse("VALIDATION_ERROR", scope.error ?? "Invalid payload"));
+        .send(errorResponse("VALIDATION_ERROR", scope.error ?? "Invalid scope"));
     }
 
     const planId = String(params.planId ?? "").trim();
@@ -824,10 +829,11 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
   });
 
   app.post("/runs", async (request, reply) => {
-    if (!validateBootstrapHeader(request.headers["x-wp-agent-bootstrap"], config)) {
+    const scope = getRequestScope(request);
+    if (!scope.value) {
       return reply
-        .code(401)
-        .send(errorResponse("RUNS_AUTH_FAILED", "Invalid bootstrap authentication header"));
+        .code(400)
+        .send(errorResponse("VALIDATION_ERROR", scope.error ?? "Invalid scope"));
     }
 
     const parsed = parseRunCreatePayload(request.body);
@@ -838,13 +844,16 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
     }
 
     const payload = parsed.value;
-    if (!(await planStore.isPairedInstallation(payload.installationId))) {
+    const installationId = scope.value.installationId;
+    const wpUserId = scope.value.wpUserId;
+
+    if (!(await planStore.isPairedInstallation(installationId))) {
       return reply
         .code(404)
         .send(errorResponse("INSTALLATION_NOT_PAIRED", "Installation is not paired"));
     }
 
-    const activeRun = await runStore.getActiveRunForInstallation(payload.installationId);
+    const activeRun = await runStore.getActiveRunForInstallation(installationId);
     if (activeRun) {
       return reply.code(409).send(
         errorResponse("RUN_ACTIVE_CONFLICT", "Installation already has an active run", {
@@ -856,8 +865,8 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
     const plan = await planStore.getPlan(payload.planId);
     if (
       !plan
-      || plan.installationId !== payload.installationId
-      || plan.wpUserId !== payload.wpUserId
+      || plan.installationId !== installationId
+      || plan.wpUserId !== wpUserId
     ) {
       return reply
         .code(404)
@@ -870,7 +879,7 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
       );
     }
 
-    const skill = await skillStore.getSkill(payload.installationId, plan.skillId);
+    const skill = await skillStore.getSkill(installationId, plan.skillId);
     if (!skill) {
       return reply
         .code(404)
@@ -902,8 +911,8 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
     const runId = randomUUID();
     const createdRun = await runStore.createRun({
       runId,
-      installationId: payload.installationId,
-      wpUserId: payload.wpUserId,
+      installationId,
+      wpUserId,
       planId: payload.planId,
       plannedSteps: mapped.plannedSteps,
       plannedToolCalls: mapped.plannedToolCalls,
@@ -931,10 +940,6 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
         mode: mapped.mode,
         page_count: mapped.pages.length,
       },
-    });
-
-    void runExecutor.executeRun(runId, payload.installationId).catch((error) => {
-      request.log.error({ error, runId }, "run executor crashed");
     });
 
     const details = await runStore.getRunWithDetails(runId);
@@ -976,18 +981,13 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
   });
 
   app.get("/runs/:runId", async (request, reply) => {
-    if (!validateBootstrapHeader(request.headers["x-wp-agent-bootstrap"], config)) {
-      return reply
-        .code(401)
-        .send(errorResponse("RUNS_AUTH_FAILED", "Invalid bootstrap authentication header"));
-    }
 
     const params = request.params as { runId?: string };
-    const scope = parsePlanScopeQuery(request.query);
+    const scope = getRequestScope(request);
     if (!scope.value) {
       return reply
         .code(400)
-        .send(errorResponse("VALIDATION_ERROR", scope.error ?? "Invalid query"));
+        .send(errorResponse("VALIDATION_ERROR", scope.error ?? "Invalid scope"));
     }
 
     const runId = String(params.runId ?? "").trim();
@@ -1043,18 +1043,13 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
   });
 
   app.post("/runs/:runId/rollback", async (request, reply) => {
-    if (!validateBootstrapHeader(request.headers["x-wp-agent-bootstrap"], config)) {
-      return reply
-        .code(401)
-        .send(errorResponse("RUNS_AUTH_FAILED", "Invalid bootstrap authentication header"));
-    }
 
     const params = request.params as { runId?: string };
-    const scope = parsePlanScopePayload(request.body);
+    const scope = getRequestScope(request);
     if (!scope.value) {
       return reply
         .code(400)
-        .send(errorResponse("VALIDATION_ERROR", scope.error ?? "Invalid payload"));
+        .send(errorResponse("VALIDATION_ERROR", scope.error ?? "Invalid scope"));
     }
 
     const runId = String(params.runId ?? "").trim();

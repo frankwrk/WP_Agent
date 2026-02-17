@@ -143,3 +143,18 @@ directly.
   - Added deterministic model-routing observability with `routingReason` and per-call LLM request IDs in logs.
   - Added idempotent skills sync no-op behavior (`status: "unchanged"`) when ingestion hash is unchanged, preserving skill timestamps.
   - Standardized plan API metadata to `plan.llm.*` (selected model, task class, preference, request IDs) and removed `llm_model` from API responses.
+
+- 2026-02-17 — Run Recovery on Restart
+  - Added backend startup reconciliation for stale active runs (`queued`, `running`, `rolling_back`) using `RUN_RECOVERY_STALE_MINUTES` (default `15`).
+  - Stale runs are now marked `failed` with `RUN_EXECUTION_ABORTED` and emit `run_recovered_after_restart` audit events.
+  - Added recovery unit tests covering stale-run failure and fresh-run no-op behavior.
+
+- 2026-02-17 — Run Worker Queueing
+  - Refactored `POST /api/v1/runs` to enqueue only and return `run_id` without inline execution in the request lifecycle.
+  - Added an in-process run worker loop that polls queued runs and claims them via DB lease (`FOR UPDATE SKIP LOCKED`) before execution.
+  - Added `RUN_WORKER_POLL_INTERVAL_MS` config and worker unit coverage for queued-run lease/execute flow.
+
+- 2026-02-17 — Auth + Heavy-Op Guardrails
+  - Centralized backend bootstrap authentication into a shared pre-handler used by plans/runs/sessions/skills routes, with attached caller scope parsing (`installation_id`, `wp_user_id`).
+  - Added synchronous guardrails for heavy endpoints: skills sync timeout/document cap and plans draft LLM/manifest/output caps.
+  - Added stage timing metadata (`meta.progress`, `meta.elapsed_ms`) for `POST /api/v1/skills/sync` and `POST /api/v1/plans/draft`.

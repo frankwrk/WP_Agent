@@ -47,6 +47,13 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     runMaxPagesPerBulk: 50,
     runJobPollIntervalMs: 5,
     runJobPollAttempts: 20,
+    runRecoveryStaleMinutes: 15,
+    runWorkerPollIntervalMs: 5,
+    skillsSyncTimeoutMs: 20000,
+    skillsSyncMaxDocuments: 200,
+    planDraftLlmTimeoutMs: 25000,
+    planDraftManifestTimeoutMs: 10000,
+    planDraftMaxOutputChars: 30000,
     ...overrides,
   };
 }

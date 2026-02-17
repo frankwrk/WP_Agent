@@ -64,6 +64,23 @@ class MemoryRunStore {
             rollbacks: [...(this.rollbacks.get(runId) ?? [])],
         };
     }
+    async claimNextQueuedRun() {
+        const now = new Date().toISOString();
+        const queued = [...this.runs.values()]
+            .filter((run) => run.status === "queued")
+            .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
+        if (!queued) {
+            return null;
+        }
+        const claimed = {
+            ...queued,
+            status: "running",
+            startedAt: queued.startedAt ?? now,
+            updatedAt: now,
+        };
+        this.runs.set(claimed.runId, claimed);
+        return claimed;
+    }
     async getActiveRunForInstallation(installationId) {
         const active = [...this.runs.values()]
             .filter((run) => run.installationId === installationId
@@ -132,6 +149,24 @@ class MemoryRunStore {
         };
         this.steps.set(input.runId, steps);
     }
+    async setActiveStepsFailed(input) {
+        const steps = this.steps.get(input.runId) ?? [];
+        const now = new Date().toISOString();
+        for (let i = 0; i < steps.length; i += 1) {
+            if (steps[i].status !== "queued" && steps[i].status !== "running") {
+                continue;
+            }
+            steps[i] = {
+                ...steps[i],
+                status: "failed",
+                errorCode: input.errorCode,
+                errorMessage: input.errorMessage,
+                finishedAt: input.finishedAt,
+                updatedAt: now,
+            };
+        }
+        this.steps.set(input.runId, steps);
+    }
     async appendRunEvent(input) {
         const event = {
             id: (0, node_crypto_1.randomUUID)(),
@@ -185,6 +220,18 @@ class MemoryRunStore {
     async listPendingRollbacks(runId) {
         const list = this.rollbacks.get(runId) ?? [];
         return list.filter((item) => item.status === "pending");
+    }
+    async listStaleActiveRuns(input) {
+        const cutoff = new Date(input.cutoffIso).getTime();
+        const limit = Math.max(1, input.limit ?? 200);
+        return [...this.runs.values()]
+            .filter((run) => run.status === "queued" || run.status === "running" || run.status === "rolling_back")
+            .filter((run) => {
+            const candidate = run.startedAt ?? run.createdAt;
+            return new Date(candidate).getTime() < cutoff;
+        })
+            .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+            .slice(0, limit);
     }
 }
 exports.MemoryRunStore = MemoryRunStore;
@@ -399,6 +446,60 @@ class PostgresRunStore {
             })),
         };
     }
+    async claimNextQueuedRun() {
+        const client = await this.pool.connect();
+        try {
+            await client.query("BEGIN");
+            const result = await client.query(`
+          WITH candidate AS (
+            SELECT run_id
+            FROM runs
+            WHERE status = 'queued'
+            ORDER BY created_at ASC
+            FOR UPDATE SKIP LOCKED
+            LIMIT 1
+          )
+          UPDATE runs AS r
+          SET
+            status = 'running',
+            started_at = COALESCE(r.started_at, NOW()),
+            updated_at = NOW()
+          FROM candidate
+          WHERE r.run_id = candidate.run_id
+          RETURNING
+            r.run_id,
+            r.installation_id,
+            r.wp_user_id,
+            r.plan_id,
+            r.status,
+            r.planned_steps,
+            r.planned_tool_calls,
+            r.planned_pages,
+            r.actual_tool_calls,
+            r.actual_pages,
+            r.error_code,
+            r.error_message,
+            r.rollback_available,
+            r.input_payload,
+            r.created_at,
+            r.updated_at,
+            r.started_at,
+            r.finished_at
+        `);
+            await client.query("COMMIT");
+            if (!result.rowCount) {
+                return null;
+            }
+            return mapRunRow(result.rows[0]);
+        }
+        catch (error) {
+            await client.query("ROLLBACK");
+            throw error;
+        }
+        finally {
+            client.release();
+        }
+    }
     async getActiveRunForInstallation(installationId) {
         const result = await this.pool.query(`
         SELECT
@@ -531,6 +632,19 @@ class PostgresRunStore {
             input.finishedAt ?? null,
         ]);
     }
+    async setActiveStepsFailed(input) {
+        await this.pool.query(`
+        UPDATE run_steps
+        SET
+          status = 'failed',
+          error_code = $2,
+          error_message = $3,
+          finished_at = $4::timestamptz,
+          updated_at = NOW()
+        WHERE run_id = $1
+          AND status IN ('queued', 'running')
+      `, [input.runId, input.errorCode, input.errorMessage, input.finishedAt]);
+    }
     async appendRunEvent(input) {
         const id = (0, node_crypto_1.randomUUID)();
         const result = await this.pool.query(`
@@ -611,6 +725,36 @@ class PostgresRunStore {
             updatedAt: row.updated_at,
             appliedAt: row.applied_at,
         }));
+    }
+    async listStaleActiveRuns(input) {
+        const limit = Math.max(1, input.limit ?? 200);
+        const result = await this.pool.query(`
+        SELECT
+          run_id,
+          installation_id,
+          wp_user_id,
+          plan_id,
+          status,
+          planned_steps,
+          planned_tool_calls,
+          planned_pages,
+          actual_tool_calls,
+          actual_pages,
+          error_code,
+          error_message,
+          rollback_available,
+          input_payload,
+          created_at,
+          updated_at,
+          started_at,
+          finished_at
+        FROM runs
+        WHERE status IN ('queued', 'running', 'rolling_back')
+          AND COALESCE(started_at, created_at) < $1::timestamptz
+        ORDER BY created_at ASC
+        LIMIT $2
+      `, [input.cutoffIso, limit]);
+        return result.rows.map((row) => mapRunRow(row));
     }
 }
 exports.PostgresRunStore = PostgresRunStore;

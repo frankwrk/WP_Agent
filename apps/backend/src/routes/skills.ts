@@ -1,7 +1,6 @@
-import { timingSafeEqual } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { Pool } from "pg";
-import { getConfig, type AppConfig } from "../config";
+import { assertProductionDatabaseConfigured, getConfig, type AppConfig } from "../config";
 import {
   ingestPinnedSkillSnapshot,
   SkillIngestError,
@@ -26,9 +25,32 @@ export interface SkillsRouteOptions {
   ingestSnapshot?: typeof ingestPinnedSkillSnapshot;
 }
 
+async function withTimeout<T>(
+  factory: () => Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<T> {
+  let timer: NodeJS.Timeout | null = null;
+  try {
+    return await Promise.race([
+      factory(),
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(timeoutMessage));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
 let cachedPool: Pool | null = null;
 
 function createStore(config: AppConfig): SkillStore {
+  assertProductionDatabaseConfigured(config);
   if (!config.databaseUrl) {
     return new MemorySkillStore();
   }
@@ -46,31 +68,15 @@ function isValidUuid(value: string): boolean {
   );
 }
 
-function constantTimeEqual(a: string, b: string): boolean {
-  const left = Buffer.from(a);
-  const right = Buffer.from(b);
-
-  if (left.length !== right.length) {
-    return false;
+function getRequestInstallationId(request: { installationId?: string }): {
+  value?: string;
+  error?: string;
+} {
+  if (!request.installationId || !isValidUuid(request.installationId)) {
+    return { error: "installation_id must be a valid UUID" };
   }
 
-  return timingSafeEqual(left, right);
-}
-
-function validateBootstrapHeader(
-  rawHeader: string | string[] | undefined,
-  config: AppConfig,
-): boolean {
-  if (!config.pairingBootstrapSecret) {
-    return false;
-  }
-
-  const header = Array.isArray(rawHeader) ? rawHeader[0] ?? "" : String(rawHeader ?? "");
-  if (!header) {
-    return false;
-  }
-
-  return constantTimeEqual(header, config.pairingBootstrapSecret);
+  return { value: request.installationId };
 }
 
 function errorResponse(code: string, message: string, details?: Record<string, unknown>) {
@@ -138,25 +144,30 @@ export async function skillsRoutes(app: FastifyInstance, options: SkillsRouteOpt
   const ingestSnapshot = options.ingestSnapshot ?? ingestPinnedSkillSnapshot;
 
   app.post("/skills/sync", async (request, reply) => {
-    if (!validateBootstrapHeader(request.headers["x-wp-agent-bootstrap"], config)) {
-      return reply
-        .code(401)
-        .send(errorResponse("SKILLS_AUTH_FAILED", "Invalid bootstrap authentication header"));
-    }
+    const startedAtMs = Date.now();
+    const progress: Array<{ stage: string; duration_ms: number }> = [];
+    const trackStage = async <T>(stage: string, fn: () => Promise<T>): Promise<T> => {
+      const stageStarted = Date.now();
+      const result = await fn();
+      progress.push({ stage, duration_ms: Date.now() - stageStarted });
+      return result;
+    };
+
 
     const body = (request.body && typeof request.body === "object"
       ? (request.body as Record<string, unknown>)
       : {}) as Record<string, unknown>;
 
-    const installationId = String(body.installation_id ?? "").trim();
-    const repoUrl = String(body.repo_url ?? config.skillSourceRepoUrl ?? "").trim();
-    const commitSha = String(body.commit_sha ?? config.skillSourceCommitSha ?? "").trim();
-
-    if (!isValidUuid(installationId)) {
+    const scope = getRequestInstallationId(request);
+    if (!scope.value) {
       return reply
         .code(400)
-        .send(errorResponse("VALIDATION_ERROR", "installation_id must be a valid UUID"));
+        .send(errorResponse("VALIDATION_ERROR", scope.error ?? "Invalid scope"));
     }
+
+    const installationId = scope.value;
+    const repoUrl = String(body.repo_url ?? config.skillSourceRepoUrl ?? "").trim();
+    const commitSha = String(body.commit_sha ?? config.skillSourceCommitSha ?? "").trim();
 
     if (!repoUrl || !commitSha) {
       return reply.code(400).send(
@@ -176,18 +187,33 @@ export async function skillsRoutes(app: FastifyInstance, options: SkillsRouteOpt
     let ingestionId: string | null = null;
 
     try {
-      const snapshot = await ingestSnapshot({ repoUrl, commitSha });
-      const specs = snapshot.documents.map((doc) => {
-        const parsed = JSON.parse(doc.content) as unknown;
-        const normalized = normalizeSkillSpec(parsed, {
-          repoUrl: snapshot.repoUrl,
-          commitSha: snapshot.commitSha,
-          path: doc.path,
-        });
+      const snapshot = await trackStage("ingest_snapshot", () =>
+        withTimeout(
+          () => ingestSnapshot({ repoUrl, commitSha }),
+          Math.max(500, config.skillsSyncTimeoutMs),
+          "skills sync ingest timed out",
+        ));
+      if (snapshot.documents.length > config.skillsSyncMaxDocuments) {
+        return reply.code(400).send(
+          errorResponse(
+            "SKILL_SYNC_CAP_EXCEEDED",
+            `Skill document count exceeds cap (${config.skillsSyncMaxDocuments})`,
+          ),
+        );
+      }
 
-        assertKnownToolNames(normalized.toolAllowlist);
-        return normalized;
-      });
+      const specs = await trackStage("normalize_specs", async () =>
+        snapshot.documents.map((doc) => {
+          const parsed = JSON.parse(doc.content) as unknown;
+          const normalized = normalizeSkillSpec(parsed, {
+            repoUrl: snapshot.repoUrl,
+            commitSha: snapshot.commitSha,
+            path: doc.path,
+          });
+
+          assertKnownToolNames(normalized.toolAllowlist);
+          return normalized;
+        }));
 
       const latest = await store.getLatestSuccessfulIngestion(installationId);
       if (latest && latest.ingestionHash === snapshot.ingestionHash) {
@@ -204,33 +230,40 @@ export async function skillsRoutes(app: FastifyInstance, options: SkillsRouteOpt
             skill_count: skillCount,
           },
           error: null,
-          meta: null,
+          meta: {
+            progress,
+            elapsed_ms: Date.now() - startedAtMs,
+          },
         });
       }
 
-      const ingestion = await store.createIngestion({
-        installationId,
-        repoUrl: snapshot.repoUrl,
-        commitSha: snapshot.commitSha,
-        ingestionHash: snapshot.ingestionHash,
-      });
-      ingestionId = ingestion.ingestionId;
+      const ingestion = await trackStage("create_ingestion", () =>
+        store.createIngestion({
+          installationId,
+          repoUrl: snapshot.repoUrl,
+          commitSha: snapshot.commitSha,
+          ingestionHash: snapshot.ingestionHash,
+        }));
+      const createdIngestionId = ingestion.ingestionId;
+      ingestionId = createdIngestionId;
 
-      await store.replaceSkillSpecs({
-        installationId,
-        ingestionId,
-        specs,
-      });
+      await trackStage("replace_skill_specs", () =>
+        store.replaceSkillSpecs({
+          installationId,
+          ingestionId: createdIngestionId,
+          specs,
+        }));
 
-      await store.updateIngestionStatus({
-        ingestionId,
-        status: "succeeded",
-      });
+      await trackStage("mark_ingestion_succeeded", () =>
+        store.updateIngestionStatus({
+          ingestionId: createdIngestionId,
+          status: "succeeded",
+        }));
 
       return reply.code(200).send({
         ok: true,
         data: {
-          ingestion_id: ingestionId,
+          ingestion_id: createdIngestionId,
           installation_id: installationId,
           status: "succeeded",
           repo_url: snapshot.repoUrl,
@@ -239,7 +272,10 @@ export async function skillsRoutes(app: FastifyInstance, options: SkillsRouteOpt
           skill_count: specs.length,
         },
         error: null,
-        meta: null,
+        meta: {
+          progress,
+          elapsed_ms: Date.now() - startedAtMs,
+        },
       });
     } catch (error) {
       if (ingestionId) {
@@ -258,6 +294,12 @@ export async function skillsRoutes(app: FastifyInstance, options: SkillsRouteOpt
         return reply.code(400).send(errorResponse(error.code, error.message));
       }
 
+      if (error instanceof Error && error.message === "skills sync ingest timed out") {
+        return reply
+          .code(504)
+          .send(errorResponse("SKILL_SYNC_TIMEOUT", "Skills sync ingest timed out"));
+      }
+
       request.log.error({ error }, "skills sync failed");
       return reply
         .code(500)
@@ -266,19 +308,16 @@ export async function skillsRoutes(app: FastifyInstance, options: SkillsRouteOpt
   });
 
   app.get("/skills", async (request, reply) => {
-    if (!validateBootstrapHeader(request.headers["x-wp-agent-bootstrap"], config)) {
+
+    const scope = getRequestInstallationId(request);
+    if (!scope.value) {
       return reply
-        .code(401)
-        .send(errorResponse("SKILLS_AUTH_FAILED", "Invalid bootstrap authentication header"));
+        .code(400)
+        .send(errorResponse("VALIDATION_ERROR", scope.error ?? "Invalid scope"));
     }
 
     const query = request.query as Record<string, unknown>;
-    const installationId = String(query.installation_id ?? "").trim();
-    if (!isValidUuid(installationId)) {
-      return reply
-        .code(400)
-        .send(errorResponse("VALIDATION_ERROR", "installation_id must be a valid UUID"));
-    }
+    const installationId = scope.value;
 
     const limit = Math.max(1, Math.min(100, Number.parseInt(String(query.limit ?? "20"), 10) || 20));
     const offset = Math.max(0, Number.parseInt(String(query.offset ?? "0"), 10) || 0);
@@ -329,23 +368,17 @@ export async function skillsRoutes(app: FastifyInstance, options: SkillsRouteOpt
   });
 
   app.get("/skills/:skillId", async (request, reply) => {
-    if (!validateBootstrapHeader(request.headers["x-wp-agent-bootstrap"], config)) {
-      return reply
-        .code(401)
-        .send(errorResponse("SKILLS_AUTH_FAILED", "Invalid bootstrap authentication header"));
-    }
 
     const params = request.params as { skillId?: string };
-    const query = request.query as Record<string, unknown>;
-
-    const installationId = String(query.installation_id ?? "").trim();
-    const skillId = String(params.skillId ?? "").trim();
-
-    if (!isValidUuid(installationId)) {
+    const scope = getRequestInstallationId(request);
+    if (!scope.value) {
       return reply
         .code(400)
-        .send(errorResponse("VALIDATION_ERROR", "installation_id must be a valid UUID"));
+        .send(errorResponse("VALIDATION_ERROR", scope.error ?? "Invalid scope"));
     }
+
+    const installationId = scope.value;
+    const skillId = String(params.skillId ?? "").trim();
 
     if (!skillId) {
       return reply.code(400).send(errorResponse("VALIDATION_ERROR", "skillId is required"));

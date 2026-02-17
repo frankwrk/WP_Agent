@@ -179,6 +179,7 @@ const ipPairingRateLimiter = new FixedWindowRateLimiter();
 const installationPairingRateLimiter = new FixedWindowRateLimiter();
 let cachedPool = null;
 function createStore(config) {
+    (0, config_1.assertProductionDatabaseConfigured)(config);
     if (!config.databaseUrl) {
         return new MemoryInstallationStore();
     }
