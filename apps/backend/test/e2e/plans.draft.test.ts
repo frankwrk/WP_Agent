@@ -8,7 +8,7 @@ import type {
   ChatCompletionRequest,
   ChatCompletionResult,
   LlmClient,
-} from "../../src/services/llm/openrouter.client";
+} from "../../src/services/llm/ai-gateway.client";
 
 const INSTALLATION_ID = "6ca8a6f8-7a9d-46a6-9d7a-e48938cf4f7e";
 
@@ -16,8 +16,8 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
     port: 3001,
     databaseUrl: "",
-    openrouterApiKey: "test-key",
-    openrouterBaseUrl: "https://openrouter.test/api/v1",
+    aiGatewayApiKey: "test-key",
+    aiGatewayBaseUrl: "https://ai-gateway.test/v1",
     pairingBootstrapSecret: "test-bootstrap-secret",
     signatureTtlSeconds: 180,
     signatureMaxSkewSeconds: 300,
@@ -43,6 +43,12 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     planMaxToolCalls: 40,
     planMaxPages: 200,
     planMaxCostUsd: 5,
+    runMaxSteps: 12,
+    runMaxToolCalls: 40,
+    runMaxPages: 200,
+    runMaxPagesPerBulk: 50,
+    runJobPollIntervalMs: 1500,
+    runJobPollAttempts: 60,
     ...overrides,
   };
 }
@@ -167,8 +173,15 @@ test("POST /api/v1/plans/draft persists plan and events", async () => {
   });
 
   assert.equal(draft.statusCode, 200);
+  assert.equal(typeof draft.headers["x-request-id"], "string");
+  assert.equal(draft.json().meta.request_id, draft.headers["x-request-id"]);
   assert.equal(draft.json().data.plan.status, "validated");
   assert.equal(draft.json().data.events.length, 2);
+  assert.equal(draft.json().data.plan.llm.selected_model, "gpt-4.1");
+  assert.equal(draft.json().data.plan.llm.task_class, "planning");
+  assert.equal(draft.json().data.plan.llm.preference, "quality");
+  assert.equal(typeof draft.json().data.plan.llm.request_id, "string");
+  assert.equal("llm_model" in draft.json().data.plan, false);
 
   const planId = draft.json().data.plan.plan_id as string;
   const fetched = await app.inject({
@@ -180,7 +193,11 @@ test("POST /api/v1/plans/draft persists plan and events", async () => {
   });
 
   assert.equal(fetched.statusCode, 200);
+  assert.equal(typeof fetched.headers["x-request-id"], "string");
+  assert.equal(fetched.json().meta.request_id, fetched.headers["x-request-id"]);
   assert.equal(fetched.json().data.plan.plan_id, planId);
+  assert.equal(fetched.json().data.plan.llm.selected_model, "gpt-4.1");
+  assert.equal("llm_model" in fetched.json().data.plan, false);
 
   const denied = await app.inject({
     method: "GET",

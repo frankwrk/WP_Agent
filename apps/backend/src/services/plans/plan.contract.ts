@@ -5,6 +5,14 @@ import type { PlanStepDraft, PlanValidationIssue } from "./plan.validate";
 
 export type PlanStatus = "draft" | "validated" | "approved" | "rejected";
 
+export interface PlanLlmContext {
+  selectedModel: string;
+  taskClass: "chat_fast" | "chat_balanced" | "chat_quality" | "planning" | "code" | "summarize" | "extract_json";
+  preference: "cheap" | "balanced" | "quality";
+  requestId: string;
+  providerRequestId?: string;
+}
+
 export interface PlanContract {
   planVersion: 1;
   planId: string;
@@ -25,9 +33,9 @@ export interface PlanContract {
     maxPages: number;
     maxCostUsd: number;
   };
+  llm: PlanLlmContext;
   status: PlanStatus;
   llmUsageTokens: number;
-  llmModel: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -119,9 +127,15 @@ export function toApiPlan(contract: PlanContract): Record<string, unknown> {
       max_pages: contract.policyContext.maxPages,
       max_cost_usd: contract.policyContext.maxCostUsd,
     },
+    llm: {
+      selected_model: contract.llm.selectedModel,
+      task_class: contract.llm.taskClass,
+      preference: contract.llm.preference,
+      request_id: contract.llm.requestId,
+      provider_request_id: contract.llm.providerRequestId,
+    },
     status: contract.status,
     llm_usage_tokens: contract.llmUsageTokens,
-    llm_model: contract.llmModel,
     created_at: contract.createdAt,
     updated_at: contract.updatedAt,
   };

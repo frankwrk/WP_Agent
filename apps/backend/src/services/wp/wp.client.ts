@@ -7,9 +7,14 @@ export interface SignedWpRequestOptions {
   body?: unknown;
 }
 
-export async function signedWpJsonRequest<T>(
+export interface SignedWpJsonResponse<T> {
+  data: T;
+  toolCallId: string;
+}
+
+export async function signedWpJsonRequestWithMeta<T>(
   options: SignedWpRequestOptions,
-): Promise<T> {
+): Promise<SignedWpJsonResponse<T>> {
   const signed = createSignedRequestHeaders({
     installationId: options.installationId,
     url: options.url,
@@ -50,7 +55,17 @@ export async function signedWpJsonRequest<T>(
     );
   }
 
-  return parsed as T;
+  return {
+    data: parsed as T,
+    toolCallId: signed.toolCallId,
+  };
+}
+
+export async function signedWpJsonRequest<T>(
+  options: SignedWpRequestOptions,
+): Promise<T> {
+  const response = await signedWpJsonRequestWithMeta<T>(options);
+  return response.data;
 }
 
 export function buildWpUrlWithQuery(
@@ -73,15 +88,24 @@ export function buildWpUrlWithQuery(
   return url.toString();
 }
 
+export async function signedWpGetJsonWithMeta<T>(options: {
+  installationId: string;
+  url: string;
+  query?: Record<string, string | number | boolean | null | undefined>;
+}): Promise<SignedWpJsonResponse<T>> {
+  const urlWithQuery = buildWpUrlWithQuery(options.url, options.query);
+  return signedWpJsonRequestWithMeta<T>({
+    installationId: options.installationId,
+    method: "GET",
+    url: urlWithQuery,
+  });
+}
+
 export async function signedWpGetJson<T>(options: {
   installationId: string;
   url: string;
   query?: Record<string, string | number | boolean | null | undefined>;
 }): Promise<T> {
-  const urlWithQuery = buildWpUrlWithQuery(options.url, options.query);
-  return signedWpJsonRequest<T>({
-    installationId: options.installationId,
-    method: "GET",
-    url: urlWithQuery,
-  });
+  const response = await signedWpGetJsonWithMeta<T>(options);
+  return response.data;
 }

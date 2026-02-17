@@ -1,0 +1,2 @@
+ALTER TABLE plans
+  ADD COLUMN IF NOT EXISTS llm_context JSONB NOT NULL DEFAULT '{}'::jsonb;

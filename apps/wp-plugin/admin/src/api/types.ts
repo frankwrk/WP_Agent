@@ -126,9 +126,15 @@ export interface PlanContractApi {
     max_pages: number;
     max_cost_usd: number;
   };
+  llm: {
+    selected_model: string;
+    task_class: "chat_fast" | "chat_balanced" | "chat_quality" | "planning" | "code" | "summarize" | "extract_json";
+    preference: "cheap" | "balanced" | "quality";
+    request_id: string;
+    provider_request_id?: string;
+  };
   status: "draft" | "validated" | "approved" | "rejected";
   llm_usage_tokens: number;
-  llm_model: string;
   created_at: string;
   updated_at: string;
 }
@@ -141,6 +147,55 @@ export interface PlanEvent {
   actor_id: string;
   payload: Record<string, unknown>;
   created_at: string;
+}
+
+export interface RunRecordApi {
+  run_id: string;
+  installation_id: string;
+  wp_user_id: number;
+  plan_id: string;
+  status: "queued" | "running" | "completed" | "failed" | "rolling_back" | "rolled_back" | "rollback_failed";
+  planned_steps: number;
+  planned_tool_calls: number;
+  planned_pages: number;
+  actual_tool_calls: number;
+  actual_pages: number;
+  error_code: string | null;
+  error_message: string | null;
+  rollback_available: boolean;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface RunStepApi {
+  step_id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  planned_tool_calls: number;
+  planned_pages: number;
+  actual_tool_calls: number;
+  actual_pages: number;
+  error_code: string | null;
+  error_message: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface RunEventApi {
+  id: string;
+  event_type: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface RunRollbackApi {
+  handle_id: string;
+  kind: string;
+  status: "pending" | "applied" | "failed";
+  error: string | null;
+  created_at: string;
+  applied_at: string | null;
 }
 
 export interface ApiEnvelope<T> {

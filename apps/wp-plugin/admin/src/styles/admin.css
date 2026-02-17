@@ -207,7 +207,14 @@
 .wp-agent-pill-status-draft,
 .wp-agent-pill-status-validated,
 .wp-agent-pill-status-approved,
-.wp-agent-pill-status-rejected {
+.wp-agent-pill-status-rejected,
+.wp-agent-pill-status-queued,
+.wp-agent-pill-status-running,
+.wp-agent-pill-status-completed,
+.wp-agent-pill-status-failed,
+.wp-agent-pill-status-rolling_back,
+.wp-agent-pill-status-rolled_back,
+.wp-agent-pill-status-rollback_failed {
   background: #eef0f2;
   color: #1d2327;
 }
@@ -253,6 +260,12 @@
 .wp-agent-events {
   margin: 8px 0 12px;
   padding-left: 18px;
+}
+
+.wp-agent-run-panel {
+  margin-top: 16px;
+  border-top: 1px solid #dcdcde;
+  padding-top: 14px;
 }
 
 @media (max-width: 980px) {

@@ -40,10 +40,41 @@ M2 adds read-only agent runtime and chat with policy:
 - Backend orchestrator uses PostgreSQL (`backend-db` service).
 - Redis is available for backend runtime features.
 
-## Acceptance Highlights (M2)
+## Milestone M3 Scope
+
+M3 added skills ingestion and plan drafting/approval:
+
+- Pinned-commit skills sync (`/api/v1/skills/sync`) with provenance persistence.
+- Skills catalog/query endpoints (`/api/v1/skills`, `/api/v1/skills/:skillId`).
+- Plan draft/validate APIs (`/api/v1/plans/draft`, `/api/v1/plans/:planId`).
+- Plan approval API (`/api/v1/plans/:planId/approve`) with status-transition semantics only.
+- Skills + Plan preview UI in WP admin.
+
+## Milestone M4 Scope
+
+M4 adds execute-phase runtime (pSEO v1, draft-only writes):
+
+- New WP write tools:
+  - `content.create_page`
+  - `content.bulk_create`
+  - `jobs.get_status`
+  - `rollback.apply`
+- Async job plumbing in WP with Action Scheduler + WP-Cron fallback.
+- Write-tool audit log and persisted rollback handles in WP tables.
+- Backend run lifecycle APIs:
+  - `POST /api/v1/runs`
+  - `GET /api/v1/runs/:runId`
+  - `POST /api/v1/runs/:runId/rollback`
+- Run state machine and one-active-run-per-installation lock.
+- Skills page Execute + run timeline + explicit rollback action.
+
+## Acceptance Highlights (M4)
 
 - Session creation requires bootstrap auth and paired installation.
 - Session creation validates required read tools from WP manifest.
 - Chat requests are scoped to `(installation_id, wp_user_id)` and blocked on scope mismatch.
 - Policy enforcement blocks oversized input, rate-limit overages, and daily token budget overages.
 - Chat context is loaded once per session and reused for subsequent messages.
+- Run creation requires approved plan scope and rejects active-run conflicts.
+- pSEO smoke path supports async bulk draft creation and run completion tracking.
+- Failed/completed runs can be explicitly rolled back via rollback handles (no auto-rollback).

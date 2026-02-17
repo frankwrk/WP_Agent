@@ -8,7 +8,7 @@ import type {
   ChatCompletionRequest,
   ChatCompletionResult,
   LlmClient,
-} from "../../src/services/llm/openrouter.client";
+} from "../../src/services/llm/ai-gateway.client";
 
 const INSTALLATION_ID = "30e9a742-a749-42ca-ac5e-16b55dbe7258";
 
@@ -16,8 +16,8 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
     port: 3001,
     databaseUrl: "",
-    openrouterApiKey: "test-key",
-    openrouterBaseUrl: "https://openrouter.test/api/v1",
+    aiGatewayApiKey: "test-key",
+    aiGatewayBaseUrl: "https://ai-gateway.test/v1",
     pairingBootstrapSecret: "test-bootstrap-secret",
     signatureTtlSeconds: 180,
     signatureMaxSkewSeconds: 300,
@@ -43,6 +43,12 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     planMaxToolCalls: 40,
     planMaxPages: 200,
     planMaxCostUsd: 5,
+    runMaxSteps: 12,
+    runMaxToolCalls: 40,
+    runMaxPages: 200,
+    runMaxPagesPerBulk: 50,
+    runJobPollIntervalMs: 1500,
+    runJobPollAttempts: 60,
     ...overrides,
   };
 }

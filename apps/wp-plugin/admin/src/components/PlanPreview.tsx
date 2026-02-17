@@ -4,10 +4,12 @@ interface PlanPreviewProps {
   plan: PlanContractApi | null;
   events: PlanEvent[];
   approving: boolean;
+  executing: boolean;
   onApprove: () => void;
+  onExecute: () => void;
 }
 
-export function PlanPreview({ plan, events, approving, onApprove }: PlanPreviewProps) {
+export function PlanPreview({ plan, events, approving, executing, onApprove, onExecute }: PlanPreviewProps) {
   if (!plan) {
     return (
       <section className="wp-agent-plan-preview">
@@ -98,6 +100,15 @@ export function PlanPreview({ plan, events, approving, onApprove }: PlanPreviewP
         onClick={onApprove}
       >
         {approving ? "Approving..." : "Approve Plan"}
+      </button>
+
+      <button
+        className="button"
+        disabled={executing || plan.status !== "approved"}
+        onClick={onExecute}
+        style={{ marginLeft: "8px" }}
+      >
+        {executing ? "Starting run..." : "Execute Plan"}
       </button>
     </section>
   );

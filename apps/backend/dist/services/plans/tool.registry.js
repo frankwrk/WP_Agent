@@ -37,8 +37,8 @@ const TOOL_REGISTRY = {
     "content.bulk_create": {
         name: "content.bulk_create",
         description: "Create multiple WordPress page drafts",
-        safetyClass: "write_publish",
-        costWeight: 7,
+        safetyClass: "write_draft",
+        costWeight: 6,
         readOnly: false,
     },
 };

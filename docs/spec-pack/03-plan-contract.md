@@ -1,4 +1,4 @@
-# Plan Contract v1 (M3)
+# Plan Contract v1 (M4)
 
 ## Purpose
 
@@ -23,7 +23,14 @@ Required fields:
 - `risk{}` (server-computed)
 - `validation_issues[]`
 - `policy_context{ policy_preset, model, max_steps, max_tool_calls, max_pages, max_cost_usd }`
+- `llm{ selected_model, task_class, preference, request_id, provider_request_id? }`
 - `status` (`validated` or `rejected` at draft time; `approved` after approve endpoint)
+
+Notes:
+
+- `llm.selected_model` is the single model authority for plan metadata.
+- `llm_model` is not returned in API responses.
+- Legacy rows without `llm_context` are read with fallback mapping.
 
 ## Parse Rules (Strict)
 
@@ -76,4 +83,12 @@ Risk tiers:
 - `validated` or `rejected` event appended after validation
 - `approved` event appended by `POST /api/v1/plans/:planId/approve`
 
-M3 stops at approval and does not execute plan steps.
+## M4 Execute Handoff
+
+M4 keeps the plan contract unchanged but adds explicit execute semantics:
+
+- `POST /api/v1/runs` accepts only `approved` plans.
+- Plan execution input is sourced from `plan.inputs.pages[]`.
+- Approve is still not auto-execute; UI/backend must call runs endpoint explicitly.
+- Run-time caps are enforced as:
+  - `min(policy caps, skill caps, env hard caps)`.

@@ -1,411 +1,97 @@
-**AI Agent Runtime for WordPress — with Hosted Orchestrator + Skill Layer**
+# WP Agent
 
-WP Agent is a hybrid **WordPress plugin + hosted SaaS backend** that brings structured AI agent runtimes into the WordPress environment.
+## AI Automation Layer for Professional WordPress Sites
 
-It allows site owners and builders to:
+WP Agent is a commercial AI automation platform built by **SYNQ +
+Studio** for agencies, consultants, and growth-focused businesses
+running WordPress.
 
-- Execute structured agent “skills” mapped to WordPress workflows
-- Automate marketing operations (pSEO, content, optimization, audits)
-- Safely connect third-party tools via OAuth
-- Enforce strict policy and cost controls
-- Operate under a deterministic execution contract (plan-based orchestration)
-
-The system is built for professional WordPress builders and agencies who want AI leverage without sacrificing control, security, or cost predictability.
+It transforms your WordPress site into a structured AI-powered execution
+environment --- without sacrificing control, performance, or cost
+predictability.
 
 ---
 
-# System Architecture Overview
+## What WP Agent Does
 
-```
-WordPress (Client)
-    └── WP Agent Plugin (PHP + React Admin UI)
-            └── Authenticated API Requests
-                    └── Hosted Orchestrator (Node / Edge API)
-                            ├── Policy Engine
-                            ├── Skill Registry
-                            ├── Execution Planner
-                            ├── Tool Connectors (OAuth)
-                            ├── LLM Runtime
-                            └── Usage & Cost Metering
-```
+WP Agent connects your WordPress site to a secure orchestration backend
+that can:
 
----
+- Generate and optimize structured content at scale
+- Execute programmatic SEO workflows
+- Audit and improve on-page performance
+- Automate repetitive marketing tasks
+- Connect to third-party tools via secure OAuth
+- Enforce strict usage and cost controls
 
-# What This Project Is
-
-WP Agent is:
-
-- A structured agent runtime layer for WordPress
-- A skill-mapped automation system
-- A policy-controlled LLM orchestration engine
-- A monetizable SaaS product
-- A foundation for expansion into frontend, performance, and ops agents
-
-WP Agent is **not**:
-
-- A generic chatbot plugin
-- An unrestricted LLM proxy
-- A simple “generate content” tool
-- A local-only automation system
-
-It is designed as a **controlled execution environment**.
+Unlike generic AI plugins, WP Agent operates under a deterministic
+execution model designed for production use.
 
 ---
 
-# Core Components
+## Who It's For
 
-## 1. WordPress Plugin
+WP Agent is designed for:
 
-### Responsibilities
+- WordPress agencies
+- Growth marketers
+- Technical founders
+- SEO consultants
+- Businesses managing multiple sites
 
-- UI for agent configuration
-- Skill selection and execution
-- OAuth connector setup
-- Site-level policy enforcement
-- Secure API communication with backend
-- Action preview + rollback hints
-- Execution logs display
-
-### Built With
-
-- PHP (plugin bootstrap)
-- React (admin UI)
-- WordPress REST API
-- Nonce-based authentication
-- Signed API requests
+If your WordPress site is part of a revenue engine, WP Agent is built
+for you.
 
 ---
 
-## 2. Hosted Orchestrator (SaaS Backend)
+## How It Works
 
-### Responsibilities
+### 1. WordPress Plugin
 
-- Plan generation
-- Skill routing
-- Tool execution
-- LLM interaction
-- Cost accounting
-- Abuse detection
-- Policy enforcement
+Installed like a standard plugin, WP Agent provides:
 
-### Subsystems
+- Skill selection interface
+- Execution previews
+- Controlled content generation
+- Connector management
+- Usage visibility
 
-| Subsystem      | Function                                         |
-| -------------- | ------------------------------------------------ |
-| Planner        | Converts user intent → deterministic plan.md     |
-| Policy Engine  | Validates token budgets, skills, domains, quotas |
-| Skill Registry | Maps skill IDs → execution handlers              |
-| Tool Gateway   | Handles external APIs + OAuth tokens             |
-| Metering Layer | Tracks token + execution cost                    |
-| Audit Logger   | Stores execution traces                          |
+### 2. Hosted Orchestrator
 
----
+Behind the scenes, a secure backend:
 
-## 3. Skill Layer
+- Converts intent into structured execution plans
+- Validates cost and policy limits
+- Executes AI-driven workflows
+- Logs and audits every action
 
-Skills are atomic, declarative, and sandboxed.
-
-Each skill includes:
-
-```json
-{
-  "id": "wp.pseo.generate",
-  "description": "Generate programmatic SEO pages",
-  "inputs": ["keyword_set", "template"],
-  "outputs": ["draft_pages"],
-  "requires_tools": ["wordpress.write"],
-  "token_estimate": 2500
-}
-```
-
-Initial v1 skills map from:
-
-- MarketingSkills repository
-- WordPress content workflows
-- SEO automation patterns
-
-Future skill domains:
-
-- Frontend design skills
-- Performance optimization
-- Technical SEO audits
-- Commerce operations
-- Analytics automation
+No direct exposure of AI keys inside WordPress.
 
 ---
 
-## 4. Policy & Abuse Protection
+## Built for Control
 
-Critical for bootstrap viability.
+WP Agent enforces:
 
-### Risk Areas
+- Token ceilings per execution
+- Daily usage quotas
+- Skill-level permissions
+- Structured execution plans
+- Preview-before-write safeguards
 
-- Infinite LLM loops
-- Malicious prompt injection
-- Excessive token usage
-- Automated content farms
-- OAuth misuse
-- External API flooding
-
-### Mitigation Strategy
-
-1. Hard token ceilings per execution
-2. Skill-level cost estimation
-3. Daily usage quotas
-4. Deterministic plan contract
-5. Signed execution envelopes
-6. Domain-bound OAuth tokens
-7. Rate limiting
-8. Anomaly detection
-
-### Example Policy JSON
-
-```json
-{
-  "site_id": "abc123",
-  "max_tokens_per_run": 8000,
-  "max_runs_per_day": 25,
-  "allowed_skills": [
-    "wp.pseo.generate",
-    "wp.content.audit",
-    "wp.meta.optimize"
-  ],
-  "blocked_domains": [],
-  "max_external_calls": 15
-}
-```
+This prevents runaway API costs and unsafe automation.
 
 ---
 
-# Execution Flow
+## Commercial Platform
 
-## Step 1: User Initiates Skill
+WP Agent is a proprietary product by SYNQ + Studio.
 
-User selects skill inside WordPress admin.
+It is not open source and is intended for commercial deployment across
+professional WordPress environments.
 
----
-
-## Step 2: Plan Generation
-
-The orchestrator generates a deterministic `plan.md`.
-
-Example:
-
-```md
-# Plan: pSEO Generation
-
-1. Fetch keyword set
-2. Generate 10 page drafts
-3. Validate internal linking
-4. Prepare WordPress draft payload
-```
-
-The plan must be:
-
-- Explicit
-- Ordered
-- Non-recursive
-- Cost-estimated
-
----
-
-## Step 3: Policy Validation
-
-The policy engine checks:
-
-- Token estimate
-- Tool usage
-- Site limits
-- OAuth scope
-- Skill permissions
-
-If valid → execution proceeds  
-If invalid → rejected with explanation
-
----
-
-## Step 4: Skill Execution
-
-Skills may:
-
-- Call LLM
-- Call WordPress REST
-- Call third-party APIs
-- Chain deterministic tool calls
-
-All calls logged.
-
----
-
-## Step 5: Result & Rollback
-
-Plugin receives:
-
-- Draft changes
-- Proposed diffs
-- Rollback metadata
-- Token usage report
-
-User confirms before permanent changes.
-
----
-
-# Connectors (OAuth & API Keys)
-
-WP Agent supports:
-
-- Google Search Console
-- GitHub
-- OpenAI API key injection (optional BYOK)
-- Analytics providers
-- Email providers
-
-### Connector Model
-
-- OAuth tokens encrypted at rest
-- Domain-scoped usage
-- Rate limited
-- Revocable
-- Stored server-side (never in WP DB)
-
----
-
-# Deterministic Plan Contract
-
-All executions must follow `plan.md` contract.
-
-### Rules
-
-1. No dynamic tool discovery mid-run
-2. No implicit recursion
-3. No unbounded loops
-4. All tools declared upfront
-5. All estimated costs precomputed
-
-This ensures:
-
-- Predictability
-- Auditability
-- Billing control
-- Safer automation
-
----
-
-# Repository Structure
-
-```
-wp-agent/
-├── wordpress-plugin/
-│   ├── wp-agent.php
-│   ├── includes/
-│   ├── admin-ui/
-│   └── assets/
-│
-├── orchestrator/
-│   ├── src/
-│   │   ├── planner/
-│   │   ├── policy/
-│   │   ├── skills/
-│   │   ├── connectors/
-│   │   └── metering/
-│   │
-│   ├── openapi.yaml
-│   └── AGENTS.md
-│
-├── shared/
-│   ├── plan-contract.md
-│   ├── policy-schema.json
-│   └── skill-schema.json
-│
-└── README.md
-```
-
----
-
-# Monetization Model
-
-Designed for:
-
-- Agencies
-- Power WordPress builders
-- Marketing automation consultants
-
-### Possible Tiers
-
-| Tier        | Features                       |
-| ----------- | ------------------------------ |
-| Free        | Limited runs, basic skills     |
-| Pro         | Expanded skills, higher limits |
-| Agency      | Multi-site, priority execution |
-| White Label | Custom branding + API access   |
-
----
-
-# Security Model
-
-- Signed JWT per execution
-- Nonce validation
-- Encrypted OAuth tokens
-- Backend rate limiting
-- Usage anomaly detection
-- Full audit logs
-- Zero LLM direct exposure from WordPress
-
----
-
-# Why This Architecture
-
-This hybrid model:
-
-- Prevents runaway API bills
-- Allows centralized skill upgrades
-- Enables SaaS monetization
-- Protects API keys
-- Allows controlled agent evolution
-
-It also supports longer-term expansion:
-
-- Multi-agent runtime
-- Design + frontend skills
-- Performance automation
-- Cross-site orchestration
-- Enterprise control layers
-
----
-
-# Roadmap (High-Level)
-
-## v0
-
-- 3–5 marketing skills
-- Deterministic plan engine
-- Policy enforcement
-- Token metering
-- WordPress write preview
-
-## v1
-
-- Connector marketplace
-- Expanded skill registry
-- Usage dashboard
-- Team roles
-
-## v2
-
-- Agent workflows
-- Multi-agent composition
-- Frontend design automation
-- Performance AI tools
-
----
-
-# Commercial Notice
-
-WP Agent is proprietary software owned and operated by SYNQ + Studio.
-
-© SYNQ + Studio 2026. All rights reserved.
-
-Unauthorized distribution, modification, or commercial reuse without explicit written permission is prohibited.
+For partnership or early access inquiries, contact SYNQ + Studio
+directly.
 
 ⸻
 
@@ -438,3 +124,22 @@ Unauthorized distribution, modification, or commercial reuse without explicit wr
   - Added Postgres migration `003_m3_skills_plans.sql` for `skill_ingestions`, `skill_specs`, `plans`, and `plan_events`.
   - Added WP admin proxy endpoints for skills/plans and new React admin Skills page with skill explorer, plan preview, and approve action.
   - Added M3 backend unit/e2e tests for skill normalization, plan parsing/validation/estimation, skills sync, plan draft, and plan approve behavior.
+
+- 2026-02-17 — M4
+  - Added WP draft-write tools `content.create_page`, `content.bulk_create`, plus `jobs.get_status` and `rollback.apply`, with manifest contracts and route registration.
+  - Added WP persistence and async execution plumbing for jobs/audit/rollback handles (`wp_agent_jobs`, `wp_agent_audit_log`, `wp_agent_rollback_handles`) with Action Scheduler + WP-Cron fallback.
+  - Added backend execute APIs (`POST /api/v1/runs`, `GET /api/v1/runs/:runId`, `POST /api/v1/runs/:runId/rollback`) and Postgres migration `004_m4_execute_runs.sql` (`runs`, `run_steps`, `run_events`, `run_rollbacks`).
+  - Added run execution state machine, per-installation active-run lock, runtime cap enforcement, bulk-job polling, and explicit rollback path.
+  - Added WP admin run proxy endpoints and Skills UI execute timeline/rollback UX, with backend tests including `run-pseo.smoke.test.ts` covering 10-draft creation flow.
+
+- 2026-02-17 — Runtime LLM Routing Update
+  - Replaced provider-specific backend client calls with Vercel AI SDK routed through Vercel AI Gateway.
+  - Added task-class model selector with `cheap|balanced|quality` preference resolution and runtime fallback candidates.
+  - Updated backend chat/planning call sites to use provider-agnostic `provider/model` IDs and model-selection debug logs.
+  - Updated backend env/config and tests to use `AI_GATEWAY_API_KEY` and `AI_GATEWAY_BASE_URL`.
+
+- 2026-02-17 — Request ID + Plan Metadata Integrity
+  - Added end-to-end request tracing on backend API responses via `x-request-id` and JSON envelope `meta.request_id`.
+  - Added deterministic model-routing observability with `routingReason` and per-call LLM request IDs in logs.
+  - Added idempotent skills sync no-op behavior (`status: "unchanged"`) when ingestion hash is unchanged, preserving skill timestamps.
+  - Standardized plan API metadata to `plan.llm.*` (selected model, task class, preference, request IDs) and removed `llm_model` from API responses.

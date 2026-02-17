@@ -189,6 +189,25 @@ export async function skillsRoutes(app: FastifyInstance, options: SkillsRouteOpt
         return normalized;
       });
 
+      const latest = await store.getLatestSuccessfulIngestion(installationId);
+      if (latest && latest.ingestionHash === snapshot.ingestionHash) {
+        const skillCount = await store.countActiveSkills(installationId);
+        return reply.code(200).send({
+          ok: true,
+          data: {
+            ingestion_id: latest.ingestionId,
+            installation_id: installationId,
+            status: "unchanged",
+            repo_url: latest.repoUrl,
+            commit_sha: latest.commitSha,
+            ingestion_hash: latest.ingestionHash,
+            skill_count: skillCount,
+          },
+          error: null,
+          meta: null,
+        });
+      }
+
       const ingestion = await store.createIngestion({
         installationId,
         repoUrl: snapshot.repoUrl,

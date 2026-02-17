@@ -41,8 +41,8 @@
 
 ## M4 — Execute phase (pSEO v1)
 
-- [ ] WP write tools: content.create_page, content.bulk_create (draft-only)
-- [ ] Jobs: Action Scheduler / WP-Cron fallback
-- [ ] Rollback handles: revisions + delete support
-- [ ] Backend: execute run state machine + step caps
-- [ ] e2e: run pSEO smoke test creates 10 drafts
+- [x] WP write tools: content.create_page, content.bulk_create (draft-only)
+- [x] Jobs: Action Scheduler / WP-Cron fallback
+- [x] Rollback handles: revisions + delete support
+- [x] Backend: execute run state machine + step caps
+- [x] e2e: run pSEO smoke test creates 10 drafts

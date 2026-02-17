@@ -9,6 +9,9 @@
     "test": "tsx --test test/**/*.test.ts"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^3.0.29",
+    "@ai-sdk/openai-compatible": "^2.0.30",
+    "ai": "^6.0.86",
     "fastify": "^5.6.1",
     "pg": "^8.16.3",
     "tweetnacl": "^1.0.3"

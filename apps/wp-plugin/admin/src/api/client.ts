@@ -6,6 +6,10 @@ import type {
   PlanContractApi,
   PlanEvent,
   PolicyPreset,
+  RunEventApi,
+  RunRecordApi,
+  RunRollbackApi,
+  RunStepApi,
   SkillCatalogItem,
   SkillSpec,
 } from "./types";
@@ -173,4 +177,54 @@ export async function approvePlan(planId: string): Promise<{ plan: PlanContractA
       body: JSON.stringify({}),
     },
   );
+}
+
+export async function createRun(planId: string): Promise<{
+  run: RunRecordApi;
+  steps: RunStepApi[];
+  events: RunEventApi[];
+  rollbacks: RunRollbackApi[];
+}> {
+  return apiRequest<{
+    run: RunRecordApi;
+    steps: RunStepApi[];
+    events: RunEventApi[];
+    rollbacks: RunRollbackApi[];
+  }>("/runs", {
+    method: "POST",
+    body: JSON.stringify({
+      plan_id: planId,
+    }),
+  });
+}
+
+export async function getRun(runId: string): Promise<{
+  run: RunRecordApi;
+  steps: RunStepApi[];
+  events: RunEventApi[];
+  rollbacks: RunRollbackApi[];
+}> {
+  return apiRequest<{
+    run: RunRecordApi;
+    steps: RunStepApi[];
+    events: RunEventApi[];
+    rollbacks: RunRollbackApi[];
+  }>(`/runs/${encodeURIComponent(runId)}`);
+}
+
+export async function rollbackRun(runId: string): Promise<{
+  run: RunRecordApi;
+  steps: RunStepApi[];
+  events: RunEventApi[];
+  rollbacks: RunRollbackApi[];
+}> {
+  return apiRequest<{
+    run: RunRecordApi;
+    steps: RunStepApi[];
+    events: RunEventApi[];
+    rollbacks: RunRollbackApi[];
+  }>(`/runs/${encodeURIComponent(runId)}/rollback`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
 }

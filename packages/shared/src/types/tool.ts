@@ -10,6 +10,7 @@ export interface ToolDefinition {
   outputSchema?: Record<string, unknown>;
   safetyClass?: ToolSafetyClass;
   costWeight?: number;
+  internalOnly?: boolean;
 }
 
 export interface ToolManifest {

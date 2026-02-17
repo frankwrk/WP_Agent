@@ -1,4 +1,4 @@
-# Security Protocols (M1)
+# Security Protocols (M4)
 
 ## SP-1 Trust Boundaries
 
@@ -140,3 +140,19 @@ WP rejects signed requests when:
   - installation pairing state
   - session scope ownership `(installation_id, wp_user_id)`
   - policy limits (rate + daily budget + input size)
+
+## SP-8 M4 Execute Controls
+
+- Execute endpoints (`/api/v1/runs*`) require bootstrap auth and installation/user scope checks.
+- Runs can start only from approved plans and are protected by one-active-run lock per installation.
+- Write tool calls continue to use signed-request verification and idempotency checks.
+- WP write operations persist audit records with run/step/tool context.
+- WP stores rollback handles for each created draft and exposes explicit rollback application endpoint.
+
+## SP-9 Draft-Only Write Enforcement
+
+- `content.create_page` and `content.bulk_create` force:
+  - `post_type=page`
+  - `post_status=draft`
+- Client-provided status/publish intent is ignored in M4.
+- Publish-class writes are out of scope until a later milestone.

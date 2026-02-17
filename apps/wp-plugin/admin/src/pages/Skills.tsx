@@ -1,12 +1,16 @@
 import { useEffect } from "react";
 import {
   approvePlan,
+  createRun,
   draftPlan,
+  getRun,
   getSkill,
   listSkills,
+  rollbackRun,
   syncSkills,
 } from "../api/client";
 import { PlanPreview } from "../components/PlanPreview";
+import { RunTimeline } from "../components/RunTimeline";
 import { SkillCard } from "../components/SkillCard";
 import { useSkillsPlannerStore } from "../state/store";
 
@@ -22,6 +26,10 @@ function parseInputs(text: string): Record<string, unknown> {
   }
 
   return parsed as Record<string, unknown>;
+}
+
+function isRunActive(status: string): boolean {
+  return status === "queued" || status === "running" || status === "rolling_back";
 }
 
 export function SkillsPage() {
@@ -54,6 +62,33 @@ export function SkillsPage() {
   useEffect(() => {
     void loadSkills();
   }, []);
+
+  useEffect(() => {
+    if (!state.run || !isRunActive(state.run.status)) {
+      return;
+    }
+
+    const pollId = window.setInterval(() => {
+      void (async () => {
+        try {
+          const response = await getRun(state.run!.run_id);
+          actions.dispatch({
+            type: "setRunResult",
+            run: response.run,
+            steps: response.steps,
+            events: response.events,
+            rollbacks: response.rollbacks,
+          });
+        } catch {
+          // keep the last known run state if polling transiently fails
+        }
+      })();
+    }, 2000);
+
+    return () => {
+      window.clearInterval(pollId);
+    };
+  }, [state.run?.run_id, state.run?.status]);
 
   const selectSkill = async (skillId: string) => {
     actions.dispatch({ type: "selectSkill", value: skillId });
@@ -140,6 +175,60 @@ export function SkillsPage() {
       });
     } finally {
       actions.dispatch({ type: "setApprovingPlan", value: false });
+    }
+  };
+
+  const handleExecute = async () => {
+    if (!state.plan) {
+      return;
+    }
+
+    actions.dispatch({ type: "setCreatingRun", value: true });
+    actions.dispatch({ type: "setError", value: null });
+
+    try {
+      const response = await createRun(state.plan.plan_id);
+      actions.dispatch({
+        type: "setRunResult",
+        run: response.run,
+        steps: response.steps,
+        events: response.events,
+        rollbacks: response.rollbacks,
+      });
+    } catch (error) {
+      actions.dispatch({
+        type: "setError",
+        value: error instanceof Error ? error.message : "Failed to start run",
+      });
+    } finally {
+      actions.dispatch({ type: "setCreatingRun", value: false });
+    }
+  };
+
+  const handleRollback = async () => {
+    if (!state.run) {
+      return;
+    }
+
+    actions.dispatch({ type: "setRollingBackRun", value: true });
+    actions.dispatch({ type: "setError", value: null });
+
+    try {
+      const response = await rollbackRun(state.run.run_id);
+      actions.dispatch({
+        type: "setRunResult",
+        run: response.run,
+        steps: response.steps,
+        events: response.events,
+        rollbacks: response.rollbacks,
+      });
+    } catch (error) {
+      actions.dispatch({
+        type: "setError",
+        value: error instanceof Error ? error.message : "Failed to apply rollback",
+      });
+    } finally {
+      actions.dispatch({ type: "setRollingBackRun", value: false });
     }
   };
 
@@ -279,7 +368,18 @@ export function SkillsPage() {
             plan={state.plan}
             events={state.events}
             approving={state.approvingPlan}
+            executing={state.creatingRun}
             onApprove={() => void handleApprove()}
+            onExecute={() => void handleExecute()}
+          />
+
+          <RunTimeline
+            run={state.run}
+            steps={state.runSteps}
+            events={state.runEvents}
+            rollbacks={state.runRollbacks}
+            rollingBack={state.rollingBackRun}
+            onRollback={() => void handleRollback()}
           />
         </div>
       </div>

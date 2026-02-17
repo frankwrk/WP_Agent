@@ -25,6 +25,7 @@ class Constants
 
     public const RATE_LIMIT_WINDOW_SECONDS = 60;
     public const RATE_LIMIT_REQUESTS_PER_WINDOW = 60;
+    public const BULK_CREATE_MAX_ITEMS = 50;
 
     public static function env(string $name, string $default = ''): string
     {
@@ -80,5 +81,10 @@ class Constants
     public static function rateLimitRequestsPerWindow(): int
     {
         return self::intEnv('WP_AGENT_RATE_LIMIT_REQUESTS_PER_WINDOW', self::RATE_LIMIT_REQUESTS_PER_WINDOW);
+    }
+
+    public static function bulkCreateMaxItems(): int
+    {
+        return self::intEnv('WP_AGENT_BULK_CREATE_MAX_ITEMS', self::BULK_CREATE_MAX_ITEMS);
     }
 }

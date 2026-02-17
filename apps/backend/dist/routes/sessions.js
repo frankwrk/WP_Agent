@@ -9,8 +9,9 @@ const enforcement_1 = require("../services/policy/enforcement");
 const limiter_1 = require("../services/policy/limiter");
 const policy_store_1 = require("../services/policy/policy.store");
 const policy_schema_1 = require("../services/policy/policy.schema");
-const openrouter_client_1 = require("../services/llm/openrouter.client");
+const ai_gateway_client_1 = require("../services/llm/ai-gateway.client");
 const model_select_1 = require("../services/llm/model.select");
+const models_1 = require("../services/llm/models");
 const usage_ledger_1 = require("../services/llm/usage.ledger");
 const tool_manifest_1 = require("../services/wp/tool.manifest");
 const wp_client_1 = require("../services/wp/wp.client");
@@ -82,8 +83,8 @@ class MemorySessionsStore {
         const dayStart = new Date(options.dayStartIso).getTime();
         let total = 0;
         for (const session of this.sessions.values()) {
-            if (session.installationId !== options.installationId ||
-                session.wpUserId !== options.wpUserId) {
+            if (session.installationId !== options.installationId
+                || session.wpUserId !== options.wpUserId) {
                 continue;
             }
             const list = this.messages.get(session.sessionId) ?? [];
@@ -254,10 +255,16 @@ class PostgresSessionsStore {
         return Number.parseInt(result.rows[0]?.total ?? "0", 10) || 0;
     }
     mapSession(row) {
+        const wpUserId = typeof row.wp_user_id === "number"
+            ? row.wp_user_id
+            : Number.parseInt(String(row.wp_user_id), 10);
+        if (!Number.isFinite(wpUserId) || wpUserId <= 0) {
+            throw new Error("Invalid wp_user_id in chat_sessions row");
+        }
         return {
             sessionId: row.session_id,
             installationId: row.installation_id,
-            wpUserId: row.wp_user_id,
+            wpUserId,
             policyPreset: row.policy_preset,
             contextSnapshot: row.context_snapshot,
             createdAt: row.created_at,
@@ -386,6 +393,7 @@ function validateSessionMessagePayload(raw) {
     const installationId = String(body.installation_id ?? "").trim();
     const wpUserId = Number.parseInt(String(body.wp_user_id ?? ""), 10);
     const content = String(body.content ?? "").trim();
+    const modelPreference = (0, models_1.parseModelPreference)(body.model_preference);
     if (!isValidUuid(installationId)) {
         return { error: "installation_id must be a valid UUID" };
     }
@@ -400,8 +408,13 @@ function validateSessionMessagePayload(raw) {
             installationId,
             wpUserId,
             content,
+            modelPreference,
         },
     };
+}
+function parsePreferenceHeader(rawHeader) {
+    const value = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+    return (0, models_1.parseModelPreference)(value);
 }
 function validateBootstrapHeader(rawHeader, config) {
     if (!config.pairingBootstrapSecret) {
@@ -466,7 +479,7 @@ function buildPromptMessages(options) {
 async function sessionsRoutes(app, options) {
     const config = options.config ?? (0, config_1.getConfig)();
     const store = options.store ?? createStore(config);
-    const llmClient = options.llmClient ?? new openrouter_client_1.OpenRouterClient();
+    const llmClient = options.llmClient ?? new ai_gateway_client_1.AiGatewayClient();
     const contextLoader = options.contextLoader ?? new WpSessionContextLoader(config);
     const policyMap = (0, policy_store_1.buildPolicyMap)(config);
     app.post("/sessions", async (request, reply) => {
@@ -590,8 +603,8 @@ async function sessionsRoutes(app, options) {
         if (!session) {
             return reply.code(404).send(errorResponse("SESSION_NOT_FOUND", "Session not found"));
         }
-        if (session.installationId !== validated.value.installationId ||
-            session.wpUserId !== validated.value.wpUserId) {
+        if (session.installationId !== validated.value.installationId
+            || session.wpUserId !== validated.value.wpUserId) {
             return reply
                 .code(403)
                 .send(errorResponse("SESSION_SCOPE_VIOLATION", "Session does not belong to caller scope"));
@@ -623,11 +636,26 @@ async function sessionsRoutes(app, options) {
                 .send(toPolicyViolationResponse(dailyBudgetViolation));
         }
         const history = await store.listMessages(sessionId, config.chatMaxPromptMessages * 2);
-        const model = (0, model_select_1.selectModelForPolicy)(policy);
+        const selectedModel = (0, model_select_1.selectModelForPolicy)({
+            policy,
+            explicitPreference: validated.value.modelPreference
+                ?? parsePreferenceHeader(request.headers["x-wp-agent-model-preference"]),
+            routeDefaultPreference: "balanced",
+        });
+        const llmRequestId = (0, node_crypto_1.randomUUID)();
+        request.log.info({
+            requestId: request.id,
+            llmRequestId,
+            taskClass: selectedModel.taskClass,
+            preference: selectedModel.preference,
+            selectedModel: selectedModel.model,
+            routingReason: selectedModel.routingReason,
+        }, "llm model selected");
         let completion;
         try {
             completion = await llmClient.completeChat({
-                model,
+                requestId: llmRequestId,
+                model: selectedModel.model,
                 maxTokens: policy.maxOutputTokens,
                 messages: buildPromptMessages({
                     contextSnapshot: session.contextSnapshot,
@@ -635,9 +663,18 @@ async function sessionsRoutes(app, options) {
                     userMessage: validated.value.content,
                 }),
             });
+            request.log.info({
+                requestId: request.id,
+                llmRequestId,
+                providerRequestId: completion.providerRequestId,
+                taskClass: selectedModel.taskClass,
+                preference: selectedModel.preference,
+                selectedModel: completion.model,
+                routingReason: selectedModel.routingReason,
+            }, "llm request completed");
         }
         catch (error) {
-            request.log.error({ error }, "chat completion failed");
+            request.log.error({ error, requestId: request.id, llmRequestId }, "chat completion failed");
             return reply
                 .code(502)
                 .send(errorResponse("LLM_UPSTREAM_ERROR", "LLM provider request failed"));
@@ -668,6 +705,9 @@ async function sessionsRoutes(app, options) {
             meta: {
                 model: completion.model,
                 used_tokens_today: usedTokensToday + completion.usageTokens,
+                llm_request_id: llmRequestId,
+                provider_request_id: completion.providerRequestId,
+                routing_reason: selectedModel.routingReason,
             },
         });
     });

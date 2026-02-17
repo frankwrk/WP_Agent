@@ -143,5 +143,6 @@ function createSignedRequestHeaders(options) {
             "X-WP-Agent-SignatureAlg": exports.SIGNATURE_ALGORITHM,
         },
         canonicalString,
+        toolCallId,
     };
 }

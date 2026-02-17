@@ -16,10 +16,16 @@ require_once __DIR__ . '/adapters/seo/rankmath.php';
 
 require_once __DIR__ . '/storage/options.php';
 require_once __DIR__ . '/storage/tables.php';
+require_once __DIR__ . '/storage/job_store.php';
+require_once __DIR__ . '/storage/audit_log.php';
+require_once __DIR__ . '/storage/rollback_store.php';
 
 require_once __DIR__ . '/install/schema.php';
 require_once __DIR__ . '/install/activator.php';
 require_once __DIR__ . '/install/deactivator.php';
+
+require_once __DIR__ . '/jobs/scheduler.php';
+require_once __DIR__ . '/jobs/bulk_create_job.php';
 
 require_once __DIR__ . '/admin/ui.php';
 
@@ -31,7 +37,7 @@ require_once __DIR__ . '/rest/auth/signatures.php';
 require_once __DIR__ . '/rest/routes.php';
 
 add_action('init', function () {
-    // Reserved for future registrations.
+    Jobs\Scheduler::registerHooks();
 });
 
 add_action('plugins_loaded', function () {

@@ -26,8 +26,8 @@ function buildInstallationsOptions(
   const config: AppConfig = {
     port: 3001,
     databaseUrl: "",
-    openrouterApiKey: "test-key",
-    openrouterBaseUrl: "https://openrouter.test/api/v1",
+    aiGatewayApiKey: "test-key",
+    aiGatewayBaseUrl: "https://ai-gateway.test/v1",
     pairingBootstrapSecret: "test-bootstrap-secret",
     signatureTtlSeconds: 180,
     signatureMaxSkewSeconds: 300,

@@ -11,8 +11,8 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
     port: 3001,
     databaseUrl: "",
-    openrouterApiKey: "test-key",
-    openrouterBaseUrl: "https://openrouter.test/api/v1",
+    aiGatewayApiKey: "test-key",
+    aiGatewayBaseUrl: "https://ai-gateway.test/v1",
     pairingBootstrapSecret: "test-bootstrap-secret",
     signatureTtlSeconds: 180,
     signatureMaxSkewSeconds: 300,
@@ -38,6 +38,12 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     planMaxToolCalls: 40,
     planMaxPages: 200,
     planMaxCostUsd: 5,
+    runMaxSteps: 12,
+    runMaxToolCalls: 40,
+    runMaxPages: 200,
+    runMaxPagesPerBulk: 50,
+    runJobPollIntervalMs: 1500,
+    runJobPollAttempts: 60,
     ...overrides,
   };
 }
@@ -138,6 +144,101 @@ test("POST /api/v1/skills/sync ingests normalized skills", async () => {
 
   assert.equal(listResponse.statusCode, 200);
   assert.equal(listResponse.json().data.items.length, 1);
+
+  await app.close();
+});
+
+test("POST /api/v1/skills/sync returns unchanged on identical ingestion hash", async () => {
+  const store = new MemorySkillStore();
+  store.pairedInstallations.add(INSTALLATION_ID);
+
+  const app = await buildServer({
+    skills: {
+      store,
+      config: testConfig(),
+      ingestSnapshot: async () => {
+        return {
+          repoUrl: "https://github.com/example/skills",
+          commitSha: "d5afdf4",
+          ingestionHash: "same-hash",
+          documents: [
+            {
+              path: "skills/content-audit/skill.json",
+              content: JSON.stringify({
+                skill_id: "wp.content.audit",
+                version: "1.0.0",
+                name: "Content Audit",
+                description: "Audit content inventory",
+                tags: ["seo"],
+                inputs_schema: { type: "object", properties: {} },
+                outputs_schema: { type: "object", properties: {} },
+                tool_allowlist: ["site.get_environment", "content.inventory"],
+                caps: { max_pages: 20, max_tool_calls: 10 },
+                safety_class: "read",
+              }),
+            },
+          ],
+        };
+      },
+    },
+  });
+
+  const first = await app.inject({
+    method: "POST",
+    url: "/api/v1/skills/sync",
+    headers: {
+      "x-wp-agent-bootstrap": "test-bootstrap-secret",
+    },
+    payload: {
+      installation_id: INSTALLATION_ID,
+      repo_url: "https://github.com/example/skills",
+      commit_sha: "d5afdf4",
+    },
+  });
+
+  assert.equal(first.statusCode, 200);
+  assert.equal(first.json().data.status, "succeeded");
+  assert.equal(first.json().data.skill_count, 1);
+
+  const beforeList = await app.inject({
+    method: "GET",
+    url: `/api/v1/skills?installation_id=${INSTALLATION_ID}`,
+    headers: {
+      "x-wp-agent-bootstrap": "test-bootstrap-secret",
+    },
+  });
+  assert.equal(beforeList.statusCode, 200);
+  assert.equal(beforeList.json().data.items.length, 1);
+  const firstUpdatedAt = beforeList.json().data.items[0].updated_at as string;
+
+  const second = await app.inject({
+    method: "POST",
+    url: "/api/v1/skills/sync",
+    headers: {
+      "x-wp-agent-bootstrap": "test-bootstrap-secret",
+    },
+    payload: {
+      installation_id: INSTALLATION_ID,
+      repo_url: "https://github.com/example/skills",
+      commit_sha: "d5afdf4",
+    },
+  });
+
+  assert.equal(second.statusCode, 200);
+  assert.equal(second.json().data.status, "unchanged");
+  assert.equal(second.json().data.skill_count, 1);
+  assert.equal(second.json().data.ingestion_hash, "same-hash");
+
+  const afterList = await app.inject({
+    method: "GET",
+    url: `/api/v1/skills?installation_id=${INSTALLATION_ID}`,
+    headers: {
+      "x-wp-agent-bootstrap": "test-bootstrap-secret",
+    },
+  });
+  assert.equal(afterList.statusCode, 200);
+  assert.equal(afterList.json().data.items.length, 1);
+  assert.equal(afterList.json().data.items[0].updated_at, firstUpdatedAt);
 
   await app.close();
 });

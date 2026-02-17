@@ -1,10 +1,12 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.signedWpJsonRequestWithMeta = signedWpJsonRequestWithMeta;
 exports.signedWpJsonRequest = signedWpJsonRequest;
 exports.buildWpUrlWithQuery = buildWpUrlWithQuery;
+exports.signedWpGetJsonWithMeta = signedWpGetJsonWithMeta;
 exports.signedWpGetJson = signedWpGetJson;
 const signature_1 = require("./signature");
-async function signedWpJsonRequest(options) {
+async function signedWpJsonRequestWithMeta(options) {
     const signed = (0, signature_1.createSignedRequestHeaders)({
         installationId: options.installationId,
         url: options.url,
@@ -38,7 +40,14 @@ async function signedWpJsonRequest(options) {
     if (!response.ok) {
         throw new Error(`Signed WP request failed (${response.status}): ${JSON.stringify(parsed)}`);
     }
-    return parsed;
+    return {
+        data: parsed,
+        toolCallId: signed.toolCallId,
+    };
+}
+async function signedWpJsonRequest(options) {
+    const response = await signedWpJsonRequestWithMeta(options);
+    return response.data;
 }
 function buildWpUrlWithQuery(baseUrl, query) {
     if (!query) {
@@ -53,11 +62,15 @@ function buildWpUrlWithQuery(baseUrl, query) {
     }
     return url.toString();
 }
-async function signedWpGetJson(options) {
+async function signedWpGetJsonWithMeta(options) {
     const urlWithQuery = buildWpUrlWithQuery(options.url, options.query);
-    return signedWpJsonRequest({
+    return signedWpJsonRequestWithMeta({
         installationId: options.installationId,
         method: "GET",
         url: urlWithQuery,
     });
+}
+async function signedWpGetJson(options) {
+    const response = await signedWpGetJsonWithMeta(options);
+    return response.data;
 }

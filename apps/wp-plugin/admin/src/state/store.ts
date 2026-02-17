@@ -3,6 +3,10 @@ import type {
   PlanContractApi,
   PlanEvent,
   PolicyPreset,
+  RunEventApi,
+  RunRecordApi,
+  RunRollbackApi,
+  RunStepApi,
   SkillCatalogItem,
   SkillSpec,
 } from "../api/types";
@@ -12,12 +16,18 @@ export interface SkillsPlannerState {
   syncingSkills: boolean;
   generatingPlan: boolean;
   approvingPlan: boolean;
+  creatingRun: boolean;
+  rollingBackRun: boolean;
   error: string | null;
   skills: SkillCatalogItem[];
   selectedSkillId: string | null;
   selectedSkill: SkillSpec | null;
   plan: PlanContractApi | null;
   events: PlanEvent[];
+  run: RunRecordApi | null;
+  runSteps: RunStepApi[];
+  runEvents: RunEventApi[];
+  runRollbacks: RunRollbackApi[];
   filters: {
     search: string;
     safetyClass: "all" | "read" | "write_draft" | "write_publish";
@@ -39,12 +49,18 @@ const INITIAL_STATE: SkillsPlannerState = {
   syncingSkills: false,
   generatingPlan: false,
   approvingPlan: false,
+  creatingRun: false,
+  rollingBackRun: false,
   error: null,
   skills: [],
   selectedSkillId: null,
   selectedSkill: null,
   plan: null,
   events: [],
+  run: null,
+  runSteps: [],
+  runEvents: [],
+  runRollbacks: [],
   filters: {
     search: "",
     safetyClass: "all",
@@ -66,11 +82,20 @@ type Action =
   | { type: "setSyncingSkills"; value: boolean }
   | { type: "setGeneratingPlan"; value: boolean }
   | { type: "setApprovingPlan"; value: boolean }
+  | { type: "setCreatingRun"; value: boolean }
+  | { type: "setRollingBackRun"; value: boolean }
   | { type: "setError"; value: string | null }
   | { type: "setSkills"; value: SkillCatalogItem[] }
   | { type: "selectSkill"; value: string | null }
   | { type: "setSelectedSkill"; value: SkillSpec | null }
   | { type: "setPlanResult"; plan: PlanContractApi; events: PlanEvent[] }
+  | {
+      type: "setRunResult";
+      run: RunRecordApi;
+      steps: RunStepApi[];
+      events: RunEventApi[];
+      rollbacks: RunRollbackApi[];
+    }
   | { type: "setEvents"; value: PlanEvent[] }
   | { type: "setFilterSearch"; value: string }
   | {
@@ -94,16 +119,46 @@ function reducer(state: SkillsPlannerState, action: Action): SkillsPlannerState 
       return { ...state, generatingPlan: action.value };
     case "setApprovingPlan":
       return { ...state, approvingPlan: action.value };
+    case "setCreatingRun":
+      return { ...state, creatingRun: action.value };
+    case "setRollingBackRun":
+      return { ...state, rollingBackRun: action.value };
     case "setError":
       return { ...state, error: action.value };
     case "setSkills":
       return { ...state, skills: action.value };
     case "selectSkill":
-      return { ...state, selectedSkillId: action.value, selectedSkill: null, plan: null, events: [] };
+      return {
+        ...state,
+        selectedSkillId: action.value,
+        selectedSkill: null,
+        plan: null,
+        events: [],
+        run: null,
+        runSteps: [],
+        runEvents: [],
+        runRollbacks: [],
+      };
     case "setSelectedSkill":
       return { ...state, selectedSkill: action.value };
     case "setPlanResult":
-      return { ...state, plan: action.plan, events: action.events };
+      return {
+        ...state,
+        plan: action.plan,
+        events: action.events,
+        run: null,
+        runSteps: [],
+        runEvents: [],
+        runRollbacks: [],
+      };
+    case "setRunResult":
+      return {
+        ...state,
+        run: action.run,
+        runSteps: action.steps,
+        runEvents: action.events,
+        runRollbacks: action.rollbacks,
+      };
     case "setEvents":
       return { ...state, events: action.value };
     case "setFilterSearch":

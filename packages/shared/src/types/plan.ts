@@ -47,6 +47,14 @@ export interface PlanPolicyContextV1 {
   max_cost_usd: number;
 }
 
+export interface PlanLlmContextV1 {
+  selected_model: string;
+  task_class: "chat_fast" | "chat_balanced" | "chat_quality" | "planning" | "code" | "summarize" | "extract_json";
+  preference: "cheap" | "balanced" | "quality";
+  request_id: string;
+  provider_request_id?: string;
+}
+
 export interface PlanContractV1 {
   plan_version: 1;
   plan_id: string;
@@ -60,7 +68,9 @@ export interface PlanContractV1 {
   risk: PlanRiskScoreV1;
   validation_issues: PlanValidationIssue[];
   policy_context: PlanPolicyContextV1;
+  llm: PlanLlmContextV1;
   status: PlanStatus;
+  llm_usage_tokens: number;
   created_at: string;
   updated_at: string;
 }

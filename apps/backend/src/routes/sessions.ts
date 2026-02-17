@@ -12,11 +12,12 @@ import { FixedWindowRateLimiter } from "../services/policy/limiter";
 import { buildPolicyMap } from "../services/policy/policy.store";
 import { isPolicyPreset, type PolicyPreset } from "../services/policy/policy.schema";
 import {
-  OpenRouterClient,
+  AiGatewayClient,
   type ChatCompletionMessage,
   type LlmClient,
-} from "../services/llm/openrouter.client";
+} from "../services/llm/ai-gateway.client";
 import { selectModelForPolicy } from "../services/llm/model.select";
+import { parseModelPreference } from "../services/llm/models";
 import { getUtcDayStartIso } from "../services/llm/usage.ledger";
 import {
   assertRequiredReadTools,
@@ -177,8 +178,8 @@ export class MemorySessionsStore implements SessionsStore {
 
     for (const session of this.sessions.values()) {
       if (
-        session.installationId !== options.installationId ||
-        session.wpUserId !== options.wpUserId
+        session.installationId !== options.installationId
+        || session.wpUserId !== options.wpUserId
       ) {
         continue;
       }
@@ -218,7 +219,7 @@ class PostgresSessionsStore implements SessionsStore {
     const result = await this.pool.query<{
       session_id: string;
       installation_id: string;
-      wp_user_id: number;
+      wp_user_id: number | string;
       policy_preset: PolicyPreset;
       context_snapshot: Record<string, unknown>;
       created_at: string;
@@ -257,7 +258,7 @@ class PostgresSessionsStore implements SessionsStore {
     const result = await this.pool.query<{
       session_id: string;
       installation_id: string;
-      wp_user_id: number;
+      wp_user_id: number | string;
       policy_preset: PolicyPreset;
       context_snapshot: Record<string, unknown>;
       created_at: string;
@@ -299,7 +300,7 @@ class PostgresSessionsStore implements SessionsStore {
     const result = await this.pool.query<{
       session_id: string;
       installation_id: string;
-      wp_user_id: number;
+      wp_user_id: number | string;
       policy_preset: PolicyPreset;
       context_snapshot: Record<string, unknown>;
       created_at: string;
@@ -448,17 +449,26 @@ class PostgresSessionsStore implements SessionsStore {
   private mapSession(row: {
     session_id: string;
     installation_id: string;
-    wp_user_id: number;
+    wp_user_id: number | string;
     policy_preset: PolicyPreset;
     context_snapshot: Record<string, unknown>;
     created_at: string;
     updated_at: string;
     last_message_at: string | null;
   }): ChatSession {
+    const wpUserId =
+      typeof row.wp_user_id === "number"
+        ? row.wp_user_id
+        : Number.parseInt(String(row.wp_user_id), 10);
+
+    if (!Number.isFinite(wpUserId) || wpUserId <= 0) {
+      throw new Error("Invalid wp_user_id in chat_sessions row");
+    }
+
     return {
       sessionId: row.session_id,
       installationId: row.installation_id,
-      wpUserId: row.wp_user_id,
+      wpUserId,
       policyPreset: row.policy_preset,
       contextSnapshot: row.context_snapshot,
       createdAt: row.created_at,
@@ -631,6 +641,7 @@ function validateSessionMessagePayload(raw: unknown): {
     installationId: string;
     wpUserId: number;
     content: string;
+    modelPreference: ReturnType<typeof parseModelPreference>;
   };
   error?: string;
 } {
@@ -642,6 +653,7 @@ function validateSessionMessagePayload(raw: unknown): {
   const installationId = String(body.installation_id ?? "").trim();
   const wpUserId = Number.parseInt(String(body.wp_user_id ?? ""), 10);
   const content = String(body.content ?? "").trim();
+  const modelPreference = parseModelPreference(body.model_preference);
 
   if (!isValidUuid(installationId)) {
     return { error: "installation_id must be a valid UUID" };
@@ -660,8 +672,14 @@ function validateSessionMessagePayload(raw: unknown): {
       installationId,
       wpUserId,
       content,
+      modelPreference,
     },
   };
+}
+
+function parsePreferenceHeader(rawHeader: string | string[] | undefined) {
+  const value = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+  return parseModelPreference(value);
 }
 
 function validateBootstrapHeader(
@@ -744,7 +762,7 @@ function buildPromptMessages(options: {
 export async function sessionsRoutes(app: FastifyInstance, options: SessionsRouteOptions) {
   const config = options.config ?? getConfig();
   const store = options.store ?? createStore(config);
-  const llmClient = options.llmClient ?? new OpenRouterClient();
+  const llmClient = options.llmClient ?? new AiGatewayClient();
   const contextLoader = options.contextLoader ?? new WpSessionContextLoader(config);
   const policyMap = buildPolicyMap(config);
 
@@ -898,8 +916,8 @@ export async function sessionsRoutes(app: FastifyInstance, options: SessionsRout
     }
 
     if (
-      session.installationId !== validated.value.installationId ||
-      session.wpUserId !== validated.value.wpUserId
+      session.installationId !== validated.value.installationId
+      || session.wpUserId !== validated.value.wpUserId
     ) {
       return reply
         .code(403)
@@ -939,12 +957,39 @@ export async function sessionsRoutes(app: FastifyInstance, options: SessionsRout
     }
 
     const history = await store.listMessages(sessionId, config.chatMaxPromptMessages * 2);
-    const model = selectModelForPolicy(policy);
+    const selectedModel = selectModelForPolicy({
+      policy,
+      explicitPreference:
+        validated.value.modelPreference
+        ?? parsePreferenceHeader(request.headers["x-wp-agent-model-preference"]),
+      routeDefaultPreference: "balanced",
+    });
 
-    let completion: { content: string; model: string; usageTokens: number };
+    const llmRequestId = randomUUID();
+
+    request.log.info(
+      {
+        requestId: request.id,
+        llmRequestId,
+        taskClass: selectedModel.taskClass,
+        preference: selectedModel.preference,
+        selectedModel: selectedModel.model,
+        routingReason: selectedModel.routingReason,
+      },
+      "llm model selected",
+    );
+
+    let completion: {
+      content: string;
+      model: string;
+      usageTokens: number;
+      providerRequestId?: string;
+    };
+
     try {
       completion = await llmClient.completeChat({
-        model,
+        requestId: llmRequestId,
+        model: selectedModel.model,
         maxTokens: policy.maxOutputTokens,
         messages: buildPromptMessages({
           contextSnapshot: session.contextSnapshot,
@@ -952,8 +997,21 @@ export async function sessionsRoutes(app: FastifyInstance, options: SessionsRout
           userMessage: validated.value.content,
         }),
       });
+
+      request.log.info(
+        {
+          requestId: request.id,
+          llmRequestId,
+          providerRequestId: completion.providerRequestId,
+          taskClass: selectedModel.taskClass,
+          preference: selectedModel.preference,
+          selectedModel: completion.model,
+          routingReason: selectedModel.routingReason,
+        },
+        "llm request completed",
+      );
     } catch (error) {
-      request.log.error({ error }, "chat completion failed");
+      request.log.error({ error, requestId: request.id, llmRequestId }, "chat completion failed");
       return reply
         .code(502)
         .send(errorResponse("LLM_UPSTREAM_ERROR", "LLM provider request failed"));
@@ -988,6 +1046,9 @@ export async function sessionsRoutes(app: FastifyInstance, options: SessionsRout
       meta: {
         model: completion.model,
         used_tokens_today: usedTokensToday + completion.usageTokens,
+        llm_request_id: llmRequestId,
+        provider_request_id: completion.providerRequestId,
+        routing_reason: selectedModel.routingReason,
       },
     });
   });
