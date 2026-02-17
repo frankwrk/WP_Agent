@@ -1,0 +1,28 @@
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.buildServer = buildServer;
+exports.getListenPort = getListenPort;
+const fastify_1 = __importDefault(require("fastify"));
+const config_1 = require("./config");
+const installations_1 = require("./routes/installations");
+const health_1 = require("./routes/health");
+const sessions_1 = require("./routes/sessions");
+async function buildServer(options = {}) {
+    const app = (0, fastify_1.default)({ logger: true });
+    app.register(health_1.healthRoutes, { prefix: "/api/v1" });
+    app.register(installations_1.installationsRoutes, {
+        prefix: "/api/v1",
+        ...(options.installations ?? {}),
+    });
+    app.register(sessions_1.sessionsRoutes, {
+        prefix: "/api/v1",
+        ...(options.sessions ?? {}),
+    });
+    return app;
+}
+function getListenPort() {
+    return (0, config_1.getConfig)().port;
+}
