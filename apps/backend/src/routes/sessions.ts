@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { Pool } from "pg";
 import { assertProductionDatabaseConfigured, getConfig, type AppConfig } from "../config";
+import { buildPool } from "../db/pool";
 import {
   enforceDailyBudget,
   enforceMessageInputLimit,
@@ -556,14 +557,14 @@ export interface SessionsRouteOptions {
 
 let cachedPool: Pool | null = null;
 
-function createStore(config: AppConfig): SessionsStore {
+function createStore(config: AppConfig, logger?: FastifyInstance["log"]): SessionsStore {
   assertProductionDatabaseConfigured(config);
   if (!config.databaseUrl) {
     return new MemorySessionsStore();
   }
 
   if (!cachedPool) {
-    cachedPool = new Pool({ connectionString: config.databaseUrl });
+    cachedPool = buildPool(config, logger);
   }
 
   return new PostgresSessionsStore(cachedPool);
@@ -725,7 +726,7 @@ function buildPromptMessages(options: {
 
 export async function sessionsRoutes(app: FastifyInstance, options: SessionsRouteOptions) {
   const config = options.config ?? getConfig();
-  const store = options.store ?? createStore(config);
+  const store = options.store ?? createStore(config, app.log);
   const llmClient = options.llmClient ?? new AiGatewayClient();
   const contextLoader = options.contextLoader ?? new WpSessionContextLoader(config);
   const policyMap = buildPolicyMap(config);

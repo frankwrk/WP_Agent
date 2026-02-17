@@ -29,25 +29,28 @@ function invalidAuthEnvelope(code) {
     };
 }
 function authErrorCodeForPath(pathname) {
-    if (pathname.startsWith("/api/v1/sessions")) {
+    if (pathname.endsWith("/sessions") || pathname.includes("/sessions/")) {
         return "SESSION_AUTH_FAILED";
     }
-    if (pathname.startsWith("/api/v1/skills")) {
+    if (pathname.endsWith("/skills") || pathname.includes("/skills/")) {
         return "SKILLS_AUTH_FAILED";
     }
-    if (pathname.startsWith("/api/v1/plans")) {
+    if (pathname.includes("/plans")) {
         return "PLANS_AUTH_FAILED";
     }
-    if (pathname.startsWith("/api/v1/runs")) {
+    if (pathname.includes("/runs")) {
         return "RUNS_AUTH_FAILED";
     }
     return "BOOTSTRAP_AUTH_FAILED";
 }
 function shouldSkipBootstrapAuth(pathname) {
-    if (!pathname.startsWith("/api/v1/")) {
-        return true;
-    }
-    return pathname === "/api/v1/health" || pathname === "/api/v1/installations/pair";
+    return pathname === "/api/v1/health"
+        || pathname === "/health"
+        || pathname === "/api/v1/installations/pair"
+        || pathname === "/installations/pair";
+}
+function getRequestPathname(request) {
+    return (request.raw.url ?? request.url).split("?")[0] ?? "";
 }
 function attachCallerScope(request) {
     request.installationId = undefined;
@@ -72,7 +75,7 @@ function attachCallerScope(request) {
     request.wpUserId = wpUserId;
 }
 async function validateBootstrapAuth(request, reply, config) {
-    const pathname = request.url.split("?")[0] ?? "";
+    const pathname = getRequestPathname(request);
     if (shouldSkipBootstrapAuth(pathname)) {
         return true;
     }
@@ -98,10 +101,6 @@ async function validateBootstrapAuth(request, reply, config) {
 const bootstrapAuthHook = async (app, options) => {
     const { config } = options;
     app.addHook("preHandler", async (request, reply) => {
-        const rawHeader = request.headers["x-wp-agent-bootstrap"];
-        if (!rawHeader && shouldSkipBootstrapAuth(request.url.split("?")[0] ?? "")) {
-            return;
-        }
         const ok = await validateBootstrapAuth(request, reply, config);
         if (!ok) {
             return;

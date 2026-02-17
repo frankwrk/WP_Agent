@@ -2,6 +2,7 @@ import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { Pool } from "pg";
 import { assertProductionDatabaseConfigured, getConfig, type AppConfig } from "../config";
+import { buildPool } from "../db/pool";
 import {
   derivePublicKeyFromPrivateKey,
   SIGNATURE_ALGORITHM,
@@ -255,14 +256,14 @@ export interface InstallationsRouteOptions {
 
 let cachedPool: Pool | null = null;
 
-function createStore(config: AppConfig): InstallationStore {
+function createStore(config: AppConfig, logger?: FastifyInstance["log"]): InstallationStore {
   assertProductionDatabaseConfigured(config);
   if (!config.databaseUrl) {
     return new MemoryInstallationStore();
   }
 
   if (!cachedPool) {
-    cachedPool = new Pool({ connectionString: config.databaseUrl });
+    cachedPool = buildPool(config, logger);
   }
 
   return new PostgresInstallationStore(cachedPool);
@@ -351,7 +352,7 @@ export async function installationsRoutes(
   options: InstallationsRouteOptions,
 ) {
   const config = options.config ?? getConfig();
-  const store = options.store ?? createStore(config);
+  const store = options.store ?? createStore(config, app.log);
 
   app.post("/installations/pair", async (request, reply) => {
     const bootstrap = request.headers["x-wp-agent-bootstrap"];

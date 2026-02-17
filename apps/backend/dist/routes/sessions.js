@@ -3,8 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.MemorySessionsStore = void 0;
 exports.sessionsRoutes = sessionsRoutes;
 const node_crypto_1 = require("node:crypto");
-const pg_1 = require("pg");
 const config_1 = require("../config");
+const pool_1 = require("../db/pool");
 const enforcement_1 = require("../services/policy/enforcement");
 const limiter_1 = require("../services/policy/limiter");
 const policy_store_1 = require("../services/policy/policy.store");
@@ -328,13 +328,13 @@ function unwrapToolResponse(response, toolName) {
     return response.data;
 }
 let cachedPool = null;
-function createStore(config) {
+function createStore(config, logger) {
     (0, config_1.assertProductionDatabaseConfigured)(config);
     if (!config.databaseUrl) {
         return new MemorySessionsStore();
     }
     if (!cachedPool) {
-        cachedPool = new pg_1.Pool({ connectionString: config.databaseUrl });
+        cachedPool = (0, pool_1.buildPool)(config, logger);
     }
     return new PostgresSessionsStore(cachedPool);
 }
@@ -452,7 +452,7 @@ function buildPromptMessages(options) {
 }
 async function sessionsRoutes(app, options) {
     const config = options.config ?? (0, config_1.getConfig)();
-    const store = options.store ?? createStore(config);
+    const store = options.store ?? createStore(config, app.log);
     const llmClient = options.llmClient ?? new ai_gateway_client_1.AiGatewayClient();
     const contextLoader = options.contextLoader ?? new WpSessionContextLoader(config);
     const policyMap = (0, policy_store_1.buildPolicyMap)(config);

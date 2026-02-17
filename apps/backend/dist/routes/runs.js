@@ -2,8 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runsRoutes = runsRoutes;
 const node_crypto_1 = require("node:crypto");
-const pg_1 = require("pg");
 const config_1 = require("../config");
+const pool_1 = require("../db/pool");
 const enforcement_1 = require("../services/policy/enforcement");
 const limiter_1 = require("../services/policy/limiter");
 const policy_store_1 = require("../services/policy/policy.store");
@@ -28,34 +28,34 @@ const tool_manifest_1 = require("../services/wp/tool.manifest");
 const planner_prompt_1 = require("../services/plans/planner.prompt");
 const planRateLimiter = new limiter_1.FixedWindowRateLimiter();
 let cachedPool = null;
-function getPool(config) {
+function getPool(config, logger) {
     if (!config.databaseUrl) {
         return null;
     }
     if (!cachedPool) {
-        cachedPool = new pg_1.Pool({ connectionString: config.databaseUrl });
+        cachedPool = (0, pool_1.buildPool)(config, logger);
     }
     return cachedPool;
 }
-function createPlanStore(config) {
+function createPlanStore(config, logger) {
     (0, config_1.assertProductionDatabaseConfigured)(config);
-    const pool = getPool(config);
+    const pool = getPool(config, logger);
     if (!pool) {
         return new store_1.MemoryPlanStore();
     }
     return new store_1.PostgresPlanStore(pool);
 }
-function createSkillStore(config) {
+function createSkillStore(config, logger) {
     (0, config_1.assertProductionDatabaseConfigured)(config);
-    const pool = getPool(config);
+    const pool = getPool(config, logger);
     if (!pool) {
         return new store_2.MemorySkillStore();
     }
     return new store_2.PostgresSkillStore(pool);
 }
-function createRunStore(config) {
+function createRunStore(config, logger) {
     (0, config_1.assertProductionDatabaseConfigured)(config);
-    const pool = getPool(config);
+    const pool = getPool(config, logger);
     if (!pool) {
         return new store_3.MemoryRunStore();
     }
@@ -220,9 +220,9 @@ async function defaultManifestToolLoader(installationId, config) {
 }
 async function runsRoutes(app, options = {}) {
     const config = options.config ?? (0, config_1.getConfig)();
-    const planStore = options.planStore ?? createPlanStore(config);
-    const skillStore = options.skillStore ?? createSkillStore(config);
-    const runStore = options.runStore ?? createRunStore(config);
+    const planStore = options.planStore ?? createPlanStore(config, app.log);
+    const skillStore = options.skillStore ?? createSkillStore(config, app.log);
+    const runStore = options.runStore ?? createRunStore(config, app.log);
     const llmClient = options.llmClient ?? new ai_gateway_client_1.AiGatewayClient();
     const manifestToolsLoader = options.manifestToolsLoader
         ? options.manifestToolsLoader

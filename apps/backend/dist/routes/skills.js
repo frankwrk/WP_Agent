@@ -1,8 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.skillsRoutes = skillsRoutes;
-const pg_1 = require("pg");
 const config_1 = require("../config");
+const pool_1 = require("../db/pool");
 const ingest_github_1 = require("../services/skills/ingest.github");
 const normalize_1 = require("../services/skills/normalize");
 const store_1 = require("../services/skills/store");
@@ -26,13 +26,13 @@ async function withTimeout(factory, timeoutMs, timeoutMessage) {
     }
 }
 let cachedPool = null;
-function createStore(config) {
+function createStore(config, logger) {
     (0, config_1.assertProductionDatabaseConfigured)(config);
     if (!config.databaseUrl) {
         return new store_1.MemorySkillStore();
     }
     if (!cachedPool) {
-        cachedPool = new pg_1.Pool({ connectionString: config.databaseUrl });
+        cachedPool = (0, pool_1.buildPool)(config, logger);
     }
     return new store_1.PostgresSkillStore(cachedPool);
 }
@@ -84,7 +84,7 @@ function toApiSkill(item) {
 }
 async function skillsRoutes(app, options = {}) {
     const config = options.config ?? (0, config_1.getConfig)();
-    const store = options.store ?? createStore(config);
+    const store = options.store ?? createStore(config, app.log);
     const ingestSnapshot = options.ingestSnapshot ?? ingest_github_1.ingestPinnedSkillSnapshot;
     app.post("/skills/sync", async (request, reply) => {
         const startedAtMs = Date.now();

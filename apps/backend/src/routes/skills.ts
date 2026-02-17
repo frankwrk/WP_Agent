@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { Pool } from "pg";
 import { assertProductionDatabaseConfigured, getConfig, type AppConfig } from "../config";
+import { buildPool } from "../db/pool";
 import {
   ingestPinnedSkillSnapshot,
   SkillIngestError,
@@ -49,14 +50,14 @@ async function withTimeout<T>(
 
 let cachedPool: Pool | null = null;
 
-function createStore(config: AppConfig): SkillStore {
+function createStore(config: AppConfig, logger?: FastifyInstance["log"]): SkillStore {
   assertProductionDatabaseConfigured(config);
   if (!config.databaseUrl) {
     return new MemorySkillStore();
   }
 
   if (!cachedPool) {
-    cachedPool = new Pool({ connectionString: config.databaseUrl });
+    cachedPool = buildPool(config, logger);
   }
 
   return new PostgresSkillStore(cachedPool);
@@ -140,7 +141,7 @@ function toApiSkill(item: {
 
 export async function skillsRoutes(app: FastifyInstance, options: SkillsRouteOptions = {}) {
   const config = options.config ?? getConfig();
-  const store = options.store ?? createStore(config);
+  const store = options.store ?? createStore(config, app.log);
   const ingestSnapshot = options.ingestSnapshot ?? ingestPinnedSkillSnapshot;
 
   app.post("/skills/sync", async (request, reply) => {
