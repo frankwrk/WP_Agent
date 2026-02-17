@@ -6,10 +6,14 @@ import {
 } from "./routes/installations";
 import { healthRoutes } from "./routes/health";
 import { sessionsRoutes, type SessionsRouteOptions } from "./routes/sessions";
+import { skillsRoutes, type SkillsRouteOptions } from "./routes/skills";
+import { runsRoutes, type RunsRouteOptions } from "./routes/runs";
 
 export interface BuildServerOptions {
   installations?: InstallationsRouteOptions;
   sessions?: SessionsRouteOptions;
+  skills?: SkillsRouteOptions;
+  runs?: RunsRouteOptions;
 }
 
 export async function buildServer(options: BuildServerOptions = {}) {
@@ -23,6 +27,14 @@ export async function buildServer(options: BuildServerOptions = {}) {
   app.register(sessionsRoutes, {
     prefix: "/api/v1",
     ...(options.sessions ?? {}),
+  });
+  app.register(skillsRoutes, {
+    prefix: "/api/v1",
+    ...(options.skills ?? {}),
+  });
+  app.register(runsRoutes, {
+    prefix: "/api/v1",
+    ...(options.runs ?? {}),
   });
 
   return app;

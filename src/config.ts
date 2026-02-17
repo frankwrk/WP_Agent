@@ -21,6 +21,12 @@ export interface AppConfig {
   chatMaxPromptMessages: number;
   chatMaxInputChars: number;
   chatSessionRetentionDays: number;
+  skillSourceRepoUrl: string;
+  skillSourceCommitSha: string;
+  planMaxSteps: number;
+  planMaxToolCalls: number;
+  planMaxPages: number;
+  planMaxCostUsd: number;
 }
 
 function intFromEnv(name: string, fallback: number): number {
@@ -30,6 +36,16 @@ function intFromEnv(name: string, fallback: number): number {
   }
 
   const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function floatFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) {
+    return fallback;
+  }
+
+  const parsed = Number.parseFloat(raw);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
@@ -66,5 +82,11 @@ export function getConfig(): AppConfig {
     chatMaxPromptMessages: intFromEnv("CHAT_MAX_PROMPT_MESSAGES", 12),
     chatMaxInputChars: intFromEnv("CHAT_MAX_INPUT_CHARS", 4000),
     chatSessionRetentionDays: intFromEnv("CHAT_SESSION_RETENTION_DAYS", 30),
+    skillSourceRepoUrl: process.env.SKILL_SOURCE_REPO_URL ?? "",
+    skillSourceCommitSha: process.env.SKILL_SOURCE_COMMIT_SHA ?? "",
+    planMaxSteps: intFromEnv("PLAN_MAX_STEPS", 12),
+    planMaxToolCalls: intFromEnv("PLAN_MAX_TOOL_CALLS", 40),
+    planMaxPages: intFromEnv("PLAN_MAX_PAGES", 200),
+    planMaxCostUsd: floatFromEnv("PLAN_MAX_COST_USD", 5),
   };
 }

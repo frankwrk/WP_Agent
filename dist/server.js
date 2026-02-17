@@ -10,6 +10,8 @@ const config_1 = require("./config");
 const installations_1 = require("./routes/installations");
 const health_1 = require("./routes/health");
 const sessions_1 = require("./routes/sessions");
+const skills_1 = require("./routes/skills");
+const runs_1 = require("./routes/runs");
 async function buildServer(options = {}) {
     const app = (0, fastify_1.default)({ logger: true });
     app.register(health_1.healthRoutes, { prefix: "/api/v1" });
@@ -20,6 +22,14 @@ async function buildServer(options = {}) {
     app.register(sessions_1.sessionsRoutes, {
         prefix: "/api/v1",
         ...(options.sessions ?? {}),
+    });
+    app.register(skills_1.skillsRoutes, {
+        prefix: "/api/v1",
+        ...(options.skills ?? {}),
+    });
+    app.register(runs_1.runsRoutes, {
+        prefix: "/api/v1",
+        ...(options.runs ?? {}),
     });
     return app;
 }
