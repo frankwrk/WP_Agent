@@ -6,7 +6,8 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "test": "tsx --test test/**/*.test.ts"
+    "test": "tsx --test test/**/*.test.ts",
+    "generate:keys": "tsx scripts/generate-keys.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.29",

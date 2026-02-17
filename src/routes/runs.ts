@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { Pool } from "pg";
 import { assertProductionDatabaseConfigured, getConfig, type AppConfig } from "../config";
+import { buildPool } from "../db/pool";
 import {
   enforceDailyBudget,
   enforceRateLimit,
@@ -71,21 +72,21 @@ export interface RunsRouteOptions {
 
 let cachedPool: Pool | null = null;
 
-function getPool(config: AppConfig): Pool | null {
+function getPool(config: AppConfig, logger?: FastifyInstance["log"]): Pool | null {
   if (!config.databaseUrl) {
     return null;
   }
 
   if (!cachedPool) {
-    cachedPool = new Pool({ connectionString: config.databaseUrl });
+    cachedPool = buildPool(config, logger);
   }
 
   return cachedPool;
 }
 
-function createPlanStore(config: AppConfig): PlanStore {
+function createPlanStore(config: AppConfig, logger?: FastifyInstance["log"]): PlanStore {
   assertProductionDatabaseConfigured(config);
-  const pool = getPool(config);
+  const pool = getPool(config, logger);
   if (!pool) {
     return new MemoryPlanStore();
   }
@@ -93,9 +94,9 @@ function createPlanStore(config: AppConfig): PlanStore {
   return new PostgresPlanStore(pool);
 }
 
-function createSkillStore(config: AppConfig): SkillStore {
+function createSkillStore(config: AppConfig, logger?: FastifyInstance["log"]): SkillStore {
   assertProductionDatabaseConfigured(config);
-  const pool = getPool(config);
+  const pool = getPool(config, logger);
   if (!pool) {
     return new MemorySkillStore();
   }
@@ -103,9 +104,9 @@ function createSkillStore(config: AppConfig): SkillStore {
   return new PostgresSkillStore(pool);
 }
 
-function createRunStore(config: AppConfig): RunStore {
+function createRunStore(config: AppConfig, logger?: FastifyInstance["log"]): RunStore {
   assertProductionDatabaseConfigured(config);
-  const pool = getPool(config);
+  const pool = getPool(config, logger);
   if (!pool) {
     return new MemoryRunStore();
   }
@@ -329,9 +330,9 @@ async function defaultManifestToolLoader(
 
 export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions = {}) {
   const config = options.config ?? getConfig();
-  const planStore = options.planStore ?? createPlanStore(config);
-  const skillStore = options.skillStore ?? createSkillStore(config);
-  const runStore = options.runStore ?? createRunStore(config);
+  const planStore = options.planStore ?? createPlanStore(config, app.log);
+  const skillStore = options.skillStore ?? createSkillStore(config, app.log);
+  const runStore = options.runStore ?? createRunStore(config, app.log);
   const llmClient = options.llmClient ?? new AiGatewayClient();
   const manifestToolsLoader = options.manifestToolsLoader
     ? options.manifestToolsLoader

@@ -16,7 +16,12 @@ const bootstrap_auth_1 = require("./plugins/bootstrap-auth");
 const http_envelope_1 = require("./utils/http-envelope");
 async function buildServer(options = {}) {
     const app = (0, fastify_1.default)({ logger: true });
-    const config = (0, config_1.getConfig)();
+    const config = options.config
+        ?? options.installations?.config
+        ?? options.sessions?.config
+        ?? options.skills?.config
+        ?? options.runs?.config
+        ?? (0, config_1.getConfig)();
     app.addHook("onSend", (request, reply, payload, done) => {
         reply.header("x-request-id", request.id);
         done(null, payload);
@@ -24,7 +29,12 @@ async function buildServer(options = {}) {
     app.addHook("preSerialization", (request, _reply, payload, done) => {
         done(null, (0, http_envelope_1.withRequestMeta)(payload, request.id));
     });
-    await app.register(bootstrap_auth_1.bootstrapAuthHook, { config });
+    app.addHook("preHandler", async (request, reply) => {
+        const ok = await (0, bootstrap_auth_1.validateBootstrapAuth)(request, reply, config);
+        if (!ok) {
+            return;
+        }
+    });
     app.register(health_1.healthRoutes, { prefix: "/api/v1" });
     app.register(installations_1.installationsRoutes, {
         prefix: "/api/v1",

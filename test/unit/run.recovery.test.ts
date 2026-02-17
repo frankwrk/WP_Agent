@@ -135,7 +135,7 @@ test("recoverStaleActiveRuns uses created_at when started_at is missing", async 
     runStore,
     logger: createLogger(),
     staleMinutes: 15,
-    now: () => new Date("2026-02-17T10:20:00.000Z"),
+    now: () => new Date(Date.now() + 20 * 60 * 1000),
   });
 
   assert.equal(recovered, 1);

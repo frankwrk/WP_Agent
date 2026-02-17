@@ -128,6 +128,7 @@ Service: `src/services/runs/*`
 - `BACKEND_SIGNING_AUDIENCE`
 - `SIGNATURE_TTL_SECONDS`
 - `SIGNATURE_MAX_SKEW_SECONDS`
+- `SUPABASE_SSL_ROOT_CERT_PATH` (required in production for DB TLS CA verification)
 - `RUN_RECOVERY_STALE_MINUTES` (optional, default `15`)
 - `RUN_WORKER_POLL_INTERVAL_MS` (optional, default `1000`)
 - `SKILLS_SYNC_TIMEOUT_MS` (optional, default `20000`)
@@ -141,6 +142,15 @@ Production boot is fail-fast: when `NODE_ENV=production`, the server refuses to 
 `DATABASE_URL`, `PAIRING_BOOTSTRAP_SECRET`, `BACKEND_SIGNING_PRIVATE_KEY`,
 `BACKEND_SIGNING_AUDIENCE`, `SIGNATURE_TTL_SECONDS`, and `SIGNATURE_MAX_SKEW_SECONDS`
 are configured.
+
+For Supabase Postgres in production, TLS CA verification is required:
+
+1. Download the Supabase **Server root certificate** from the Supabase project database/TLS settings.
+2. Store it on the server at `/etc/synq/supabase-ca.pem` (or another absolute path readable by the backend process).
+3. Set `SUPABASE_SSL_ROOT_CERT_PATH=/etc/synq/supabase-ca.pem`.
+4. Use `DATABASE_URL` without `sslmode=no-verify` (omit `sslmode` entirely, or use `sslmode=verify-full`).
+
+At startup, the backend logs whether DB SSL CA verification is enabled. It never logs certificate contents.
 
 Run recovery is executed during backend startup: active runs in `queued`, `running`, or
 `rolling_back` with stale `COALESCE(started_at, created_at)` older than

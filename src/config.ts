@@ -1,6 +1,7 @@
 export interface AppConfig {
   port: number;
   databaseUrl: string;
+  supabaseSslRootCertPath: string;
   aiGatewayApiKey: string;
   aiGatewayBaseUrl: string;
   pairingBootstrapSecret: string;
@@ -75,6 +76,7 @@ export function getConfig(): AppConfig {
   return {
     port: intFromEnv("PORT", 3001),
     databaseUrl: process.env.DATABASE_URL ?? "",
+    supabaseSslRootCertPath: process.env.SUPABASE_SSL_ROOT_CERT_PATH ?? "",
     aiGatewayApiKey: process.env.AI_GATEWAY_API_KEY ?? "",
     aiGatewayBaseUrl:
       process.env.AI_GATEWAY_BASE_URL ?? "https://ai-gateway.vercel.sh/v1",

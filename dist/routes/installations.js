@@ -3,8 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.MemoryInstallationStore = void 0;
 exports.installationsRoutes = installationsRoutes;
 const node_crypto_1 = require("node:crypto");
-const pg_1 = require("pg");
 const config_1 = require("../config");
+const pool_1 = require("../db/pool");
 const signature_1 = require("../services/wp/signature");
 class MemoryInstallationStore {
     installations = new Map();
@@ -178,13 +178,13 @@ class FixedWindowRateLimiter {
 const ipPairingRateLimiter = new FixedWindowRateLimiter();
 const installationPairingRateLimiter = new FixedWindowRateLimiter();
 let cachedPool = null;
-function createStore(config) {
+function createStore(config, logger) {
     (0, config_1.assertProductionDatabaseConfigured)(config);
     if (!config.databaseUrl) {
         return new MemoryInstallationStore();
     }
     if (!cachedPool) {
-        cachedPool = new pg_1.Pool({ connectionString: config.databaseUrl });
+        cachedPool = (0, pool_1.buildPool)(config, logger);
     }
     return new PostgresInstallationStore(cachedPool);
 }
@@ -254,7 +254,7 @@ function errorResponse(code, message) {
 }
 async function installationsRoutes(app, options) {
     const config = options.config ?? (0, config_1.getConfig)();
-    const store = options.store ?? createStore(config);
+    const store = options.store ?? createStore(config, app.log);
     app.post("/installations/pair", async (request, reply) => {
         const bootstrap = request.headers["x-wp-agent-bootstrap"];
         const bootstrapHeader = Array.isArray(bootstrap)
