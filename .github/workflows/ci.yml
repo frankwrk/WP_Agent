@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  backend-build:
+  backend-build-and-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,6 +20,8 @@ jobs:
         run: pnpm install --no-frozen-lockfile
       - name: Build backend
         run: pnpm --filter @wp-agent/backend build
+      - name: Test backend
+        run: pnpm --filter @wp-agent/backend test
 
   php-lint:
     runs-on: ubuntu-latest

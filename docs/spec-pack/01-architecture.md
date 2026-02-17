@@ -1,29 +1,37 @@
-Implementation
+# Architecture Notes (M2)
 
-apps/wp-plugin/admin/src/pages/
-Connect.tsx
-Chat.tsx
-Skills.tsx
-RunDetail.tsx
-Settings.tsx
+## Admin UI
 
-### **Rules**
+React pages implemented in:
 
-- No direct LLM calls from browser
-- All execution via backend
-- Plan preview required before execute
+- `apps/wp-plugin/admin/src/pages/Connect.tsx`
+- `apps/wp-plugin/admin/src/pages/Chat.tsx`
 
-Shared Contracts
+WordPress registers menu pages and enqueues the Vite bundle from:
 
-packages/shared/
+- `apps/wp-plugin/includes/admin/ui.php`
 
-Includes:
+## Request Flow
 
-- Policy schema
-- Plan schema
-- Tool schema
-- Skill schema
+1. Browser (WP admin) calls `wp-agent-admin/v1/*` using WP nonce.
+2. WP admin REST proxy validates capability + nonce.
+3. WP server calls backend `/api/v1/sessions*` with `X-WP-Agent-Bootstrap`.
+4. Backend validates policy + installation + scope.
+5. Backend loads WP tool context once (session create), then reuses snapshot for chat.
 
-### **MUST**
+## Runtime Rules
 
-Backend and WP must both depend on these shared definitions where possible.
+- No direct browser-to-LLM calls.
+- No direct browser-to-backend calls.
+- Tool context is provided by signed backend->WP calls.
+- Chat is read-only in M2.
+
+## Shared Contracts
+
+`packages/shared/src` defines shared interfaces for:
+
+- policy presets
+- tool manifest/tool definitions
+- plan/skill placeholders
+
+These shared types are used as canonical contract definitions for later milestones.

@@ -9,27 +9,35 @@
 
 ## M1 — Pairing + Security plumbing
 
-- [ ] WP: generate installation_id + keypair; store private locally
-- [ ] Backend: /installations/pair stores public key
-- [ ] Backend→WP signed tool call support (verify in WP)
-- [ ] WP: idempotency store (tool_call_id)
-- [ ] WP: rate limiting primitives for Tool API
-- [ ] Docs: security protocols updated
+- [x] WP: generate installation_id + keypair; store private locally
+- [x] Backend: /installations/pair stores public key
+- [x] Backend→WP signed tool call support (verify in WP)
+- [x] WP: idempotency store (tool_call_id)
+- [x] WP: rate limiting primitives for Tool API
+- [x] Docs: security protocols updated
 
 ## M2 — Read-only agent
 
-- [ ] WP tools: site.get_environment, content.inventory, seo.get_config
-- [ ] Backend: wp client + tool manifest loader
-- [ ] Backend: sessions + chat endpoint (policy enforced)
-- [ ] UI: Connect + Chat pages
+- [x] WP tools: site.get_environment, content.inventory, seo.get_config
+- [x] Backend: wp client + tool manifest loader
+- [x] Backend: sessions + chat endpoint (policy enforced)
+- [x] UI: Connect + Chat pages
 
 ## M3 — Skills + Plan phase
 
-- [ ] Backend: ingest marketingskills repo (pin commit hash)
-- [ ] SkillSpec normalization store
-- [ ] PlanContract parse + validate
-- [ ] Estimate: pages + tool calls + cost
-- [ ] UI: Skills list + Plan preview
+- [ ] Backend: ingest marketingskills repo (pin commit hash + provenance)
+  [ ] Define SkillSpec canonical schema v1 + normalizer
+  [ ] SkillSpec store: versioning + tagging + indexing
+  [ ] Backend: tool registry v1 (schemas, safety class, cost weights)
+  [ ] Bind skills ↔ tools (allowlists) and validate at plan-time
+  [ ] Define PlanContract schema v1 (plan_id, plan_hash, steps, assumptions)
+  [ ] Implement PlanContract parser (strict, single-block) + validator (schema + policy)
+  [ ] Estimation engine v1 (pages, tool calls, tokens buckets, cost bands, runtime)
+  [ ] Plan risk scoring + gating rules (machine-readable failures)
+  [ ] Persist plans + plan_events (approved/draft/rejected)
+  [ ] UI: Skills explorer (filters + detail)
+  [ ] UI: Plan preview (steps, estimate, risk, approve action)
+  [ ] (Optional) Plan diff view for regenerated plans
 
 ## M4 — Execute phase (pSEO v1)
 
