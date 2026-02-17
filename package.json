@@ -11,6 +11,7 @@
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
     "dev": "pnpm -r dev",
-    "fmt": "pnpm -r fmt"
+    "fmt": "pnpm -r fmt",
+    "deploy:backend": "bash scripts/deploy-backend.sh"
   }
 }
