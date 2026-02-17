@@ -13,8 +13,8 @@ function testConfig(): AppConfig {
   return {
     port: 3001,
     databaseUrl: "",
-    openrouterApiKey: "test",
-    openrouterBaseUrl: "https://openrouter.test/api/v1",
+    aiGatewayApiKey: "test",
+    aiGatewayBaseUrl: "https://ai-gateway.test/v1",
     pairingBootstrapSecret: "bootstrap",
     signatureTtlSeconds: 180,
     signatureMaxSkewSeconds: 300,

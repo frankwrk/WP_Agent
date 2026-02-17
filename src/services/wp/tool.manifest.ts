@@ -7,6 +7,9 @@ export interface ToolDefinition {
   endpoint: string;
   method: "GET" | "POST";
   readOnly: boolean;
+  safetyClass?: "read" | "write_draft" | "write_publish";
+  costWeight?: number;
+  internalOnly?: boolean;
   inputSchema?: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;
 }
@@ -56,6 +59,16 @@ function parseToolDefinition(input: unknown): ToolDefinition | null {
     endpoint,
     method,
     readOnly,
+    safetyClass:
+      candidate.safetyClass === "read"
+      || candidate.safetyClass === "write_draft"
+      || candidate.safetyClass === "write_publish"
+        ? (candidate.safetyClass as "read" | "write_draft" | "write_publish")
+        : undefined,
+    costWeight: Number.isFinite(Number(candidate.costWeight))
+      ? Number(candidate.costWeight)
+      : undefined,
+    internalOnly: candidate.internalOnly === undefined ? undefined : Boolean(candidate.internalOnly),
     inputSchema:
       candidate.inputSchema && typeof candidate.inputSchema === "object"
         ? (candidate.inputSchema as Record<string, unknown>)

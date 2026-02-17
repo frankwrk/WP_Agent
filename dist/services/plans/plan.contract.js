@@ -75,9 +75,15 @@ function toApiPlan(contract) {
             max_pages: contract.policyContext.maxPages,
             max_cost_usd: contract.policyContext.maxCostUsd,
         },
+        llm: {
+            selected_model: contract.llm.selectedModel,
+            task_class: contract.llm.taskClass,
+            preference: contract.llm.preference,
+            request_id: contract.llm.requestId,
+            provider_request_id: contract.llm.providerRequestId,
+        },
         status: contract.status,
         llm_usage_tokens: contract.llmUsageTokens,
-        llm_model: contract.llmModel,
         created_at: contract.createdAt,
         updated_at: contract.updatedAt,
     };

@@ -8,7 +8,7 @@ import { MemorySkillStore } from "../../src/services/skills/store";
 import { MemoryRunStore } from "../../src/services/runs/store";
 import { RunExecutor } from "../../src/services/runs/executor";
 
-const INSTALLATION_ID = "5f445174-4937-4c3d-8f3f-e5c6cd65f5a5";
+const INSTALLATION_ID = "b41e0f25-b4fd-4e77-a6ea-0d4a75f62098";
 
 function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
@@ -51,13 +51,14 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   };
 }
 
-async function seedSkillStore(skillStore: MemorySkillStore) {
+async function seed(planStore: MemoryPlanStore, skillStore: MemorySkillStore): Promise<string> {
+  planStore.pairedInstallations.add(INSTALLATION_ID);
   skillStore.pairedInstallations.add(INSTALLATION_ID);
 
   const ingestion = await skillStore.createIngestion({
     installationId: INSTALLATION_ID,
-    repoUrl: "https://github.com/example/skills",
-    commitSha: "abc123",
+    repoUrl: "https://example.com",
+    commitSha: "abc",
     ingestionHash: "hash",
   });
 
@@ -68,15 +69,15 @@ async function seedSkillStore(skillStore: MemorySkillStore) {
       {
         skillId: "wp.pseo.generate",
         version: "1.0.0",
-        sourceRepo: "https://github.com/example/skills",
-        sourceCommitSha: "abc123",
+        sourceRepo: "https://example.com",
+        sourceCommitSha: "abc",
         sourcePath: "skills/pseo/skill.json",
         name: "pSEO",
-        description: "Generate pSEO drafts",
+        description: "Generate drafts",
         tags: ["seo"],
         inputsSchema: {},
         outputsSchema: {},
-        toolAllowlist: ["content.create_page", "content.bulk_create"],
+        toolAllowlist: ["content.bulk_create"],
         caps: { maxPages: 50, maxToolCalls: 20, maxSteps: 8, maxCostUsd: 2 },
         safetyClass: "write_draft",
         deprecated: false,
@@ -88,41 +89,38 @@ async function seedSkillStore(skillStore: MemorySkillStore) {
     ingestionId: ingestion.ingestionId,
     status: "succeeded",
   });
-}
-
-async function seedApprovedPlan(planStore: MemoryPlanStore): Promise<string> {
-  planStore.pairedInstallations.add(INSTALLATION_ID);
 
   const planId = randomUUID();
   await planStore.createPlan({
     planId,
     installationId: INSTALLATION_ID,
-    wpUserId: 1,
+    wpUserId: 2,
     skillId: "wp.pseo.generate",
     policyPreset: "balanced",
     status: "approved",
-    goal: "Create pSEO drafts",
+    goal: "Create drafts",
     assumptions: [],
     inputs: {
-      pages: new Array(10).fill(0).map((_, index) => ({
-        title: `Page ${index + 1}`,
-        slug: `page-${index + 1}`,
-        content: `Body ${index + 1}`,
-      })),
+      pages: [
+        {
+          title: "One",
+          content: "Body",
+        },
+      ],
     },
     steps: [
       {
         stepId: "step-create",
-        title: "Create draft pages",
-        objective: "Create 10 draft pages",
+        title: "Create",
+        objective: "Create",
         tools: ["content.bulk_create"],
-        expectedOutput: "Draft pages",
-        pageCountEstimate: 10,
+        expectedOutput: "Draft",
+        pageCountEstimate: 1,
         toolCallEstimate: 1,
       },
     ],
     estimates: {
-      estimatedPages: 10,
+      estimatedPages: 1,
       estimatedToolCalls: { "content.bulk_create": 1 },
       estimatedTokensBucket: "low",
       estimatedCostUsdBand: "low",
@@ -132,7 +130,7 @@ async function seedApprovedPlan(planStore: MemoryPlanStore): Promise<string> {
     },
     risk: {
       tier: "MEDIUM",
-      score: 45,
+      score: 40,
       factors: {
         numberOfSteps: 1,
         writeIntensity: 0.5,
@@ -162,69 +160,34 @@ async function seedApprovedPlan(planStore: MemoryPlanStore): Promise<string> {
   return planId;
 }
 
-test("M4 pSEO smoke: approved plan run creates 10 drafts", async () => {
+test("POST /api/v1/runs blocks concurrent active run per installation", async () => {
   const planStore = new MemoryPlanStore();
   const skillStore = new MemorySkillStore();
   const runStore = new MemoryRunStore();
+  const planId = await seed(planStore, skillStore);
 
-  await seedSkillStore(skillStore);
-  const planId = await seedApprovedPlan(planStore);
-
-  let jobPollCount = 0;
   const runExecutor = new RunExecutor({
     runStore,
     wpToolApiBase: "http://wp.test/wp-json/wp-agent/v1",
-    jobPollIntervalMs: 5,
-    jobPollAttempts: 20,
-    invokePost: async ({ url }) => {
-      if (url.endsWith("/content/bulk-create")) {
-        return {
-          ok: true,
-          data: {
-            job_id: "11111111-1111-4111-8111-111111111111",
-            status: "queued",
-          },
-        };
-      }
-
-      throw new Error(`Unexpected POST URL ${url}`);
-    },
-    invokeGet: async ({ url }) => {
-      if (!url.includes("/jobs/11111111-1111-4111-8111-111111111111")) {
-        throw new Error(`Unexpected GET URL ${url}`);
-      }
-
-      jobPollCount += 1;
-      if (jobPollCount < 2) {
-        return {
-          ok: true,
-          data: {
-            job_id: "11111111-1111-4111-8111-111111111111",
-            status: "running",
-          },
-        };
-      }
-
+    jobPollIntervalMs: 100,
+    jobPollAttempts: 100,
+    invokePost: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
       return {
         ok: true,
         data: {
           job_id: "11111111-1111-4111-8111-111111111111",
-          status: "completed",
-          progress: {
-            total_items: 10,
-            processed_items: 10,
-            created_items: 10,
-            failed_items: 0,
-          },
-          rollback_handles: new Array(10).fill(0).map((_, index) => ({
-            handle_id: `rh-${index + 1}`,
-            kind: "delete_post",
-            payload: { post_id: index + 1 },
-          })),
-          errors: [],
+          status: "queued",
         },
       };
     },
+    invokeGet: async () => ({
+      ok: true,
+      data: {
+        job_id: "11111111-1111-4111-8111-111111111111",
+        status: "running",
+      },
+    }),
   });
 
   const app = await buildServer({
@@ -238,7 +201,7 @@ test("M4 pSEO smoke: approved plan run creates 10 drafts", async () => {
     },
   });
 
-  const create = await app.inject({
+  const first = await app.inject({
     method: "POST",
     url: "/api/v1/runs",
     headers: {
@@ -246,41 +209,28 @@ test("M4 pSEO smoke: approved plan run creates 10 drafts", async () => {
     },
     payload: {
       installation_id: INSTALLATION_ID,
-      wp_user_id: 1,
+      wp_user_id: 2,
       plan_id: planId,
     },
   });
 
-  assert.equal(create.statusCode, 202);
-  const runId = create.json().data.run.run_id as string;
+  assert.equal(first.statusCode, 202);
 
-  let details = await app.inject({
-    method: "GET",
-    url: `/api/v1/runs/${runId}?installation_id=${INSTALLATION_ID}&wp_user_id=1`,
+  const second = await app.inject({
+    method: "POST",
+    url: "/api/v1/runs",
     headers: {
       "x-wp-agent-bootstrap": "test-bootstrap-secret",
     },
+    payload: {
+      installation_id: INSTALLATION_ID,
+      wp_user_id: 2,
+      plan_id: planId,
+    },
   });
 
-  for (let attempt = 0; attempt < 30; attempt += 1) {
-    if (details.json().data.run.status === "completed") {
-      break;
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    details = await app.inject({
-      method: "GET",
-      url: `/api/v1/runs/${runId}?installation_id=${INSTALLATION_ID}&wp_user_id=1`,
-      headers: {
-        "x-wp-agent-bootstrap": "test-bootstrap-secret",
-      },
-    });
-  }
-
-  assert.equal(details.statusCode, 200);
-  assert.equal(details.json().data.run.status, "completed");
-  assert.equal(details.json().data.run.actual_pages, 10);
-  assert.equal(details.json().data.rollbacks.length, 10);
+  assert.equal(second.statusCode, 409);
+  assert.equal(second.json().error.code, "RUN_ACTIVE_CONFLICT");
 
   await app.close();
 });

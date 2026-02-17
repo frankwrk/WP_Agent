@@ -1,8 +1,8 @@
 export interface AppConfig {
   port: number;
   databaseUrl: string;
-  openrouterApiKey: string;
-  openrouterBaseUrl: string;
+  aiGatewayApiKey: string;
+  aiGatewayBaseUrl: string;
   pairingBootstrapSecret: string;
   signatureTtlSeconds: number;
   signatureMaxSkewSeconds: number;
@@ -27,6 +27,12 @@ export interface AppConfig {
   planMaxToolCalls: number;
   planMaxPages: number;
   planMaxCostUsd: number;
+  runMaxSteps: number;
+  runMaxToolCalls: number;
+  runMaxPages: number;
+  runMaxPagesPerBulk: number;
+  runJobPollIntervalMs: number;
+  runJobPollAttempts: number;
 }
 
 function intFromEnv(name: string, fallback: number): number {
@@ -53,9 +59,9 @@ export function getConfig(): AppConfig {
   return {
     port: intFromEnv("PORT", 3001),
     databaseUrl: process.env.DATABASE_URL ?? "",
-    openrouterApiKey: process.env.OPENROUTER_API_KEY ?? "",
-    openrouterBaseUrl:
-      process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1",
+    aiGatewayApiKey: process.env.AI_GATEWAY_API_KEY ?? "",
+    aiGatewayBaseUrl:
+      process.env.AI_GATEWAY_BASE_URL ?? "https://ai-gateway.vercel.sh/v1",
     pairingBootstrapSecret: process.env.PAIRING_BOOTSTRAP_SECRET ?? "",
     signatureTtlSeconds: intFromEnv("SIGNATURE_TTL_SECONDS", 180),
     signatureMaxSkewSeconds: intFromEnv("SIGNATURE_MAX_SKEW_SECONDS", 300),
@@ -72,11 +78,10 @@ export function getConfig(): AppConfig {
       "PAIRING_RATE_LIMIT_PER_MINUTE_INSTALLATION",
       10,
     ),
-    chatModelFast: process.env.CHAT_MODEL_FAST ?? "gpt-4.1-mini",
-    chatModelBalanced: process.env.CHAT_MODEL_BALANCED ?? "gpt-4.1",
-    chatModelQuality:
-      process.env.CHAT_MODEL_QUALITY ?? "anthropic/claude-sonnet-4",
-    chatModelReasoning: process.env.CHAT_MODEL_REASONING ?? "o3",
+    chatModelFast: process.env.CHAT_MODEL_FAST ?? "google/gemini-2.5-flash-lite",
+    chatModelBalanced: process.env.CHAT_MODEL_BALANCED ?? "anthropic/claude-sonnet-4.5",
+    chatModelQuality: process.env.CHAT_MODEL_QUALITY ?? "anthropic/claude-opus-4.6",
+    chatModelReasoning: process.env.CHAT_MODEL_REASONING ?? "openai/gpt-5.2",
     chatRateLimitPerMinute: intFromEnv("CHAT_RATE_LIMIT_PER_MINUTE", 20),
     chatDailyTokenCap: intFromEnv("CHAT_DAILY_TOKEN_CAP", 50000),
     chatMaxPromptMessages: intFromEnv("CHAT_MAX_PROMPT_MESSAGES", 12),
@@ -88,5 +93,11 @@ export function getConfig(): AppConfig {
     planMaxToolCalls: intFromEnv("PLAN_MAX_TOOL_CALLS", 40),
     planMaxPages: intFromEnv("PLAN_MAX_PAGES", 200),
     planMaxCostUsd: floatFromEnv("PLAN_MAX_COST_USD", 5),
+    runMaxSteps: intFromEnv("RUN_MAX_STEPS", 12),
+    runMaxToolCalls: intFromEnv("RUN_MAX_TOOL_CALLS", 40),
+    runMaxPages: intFromEnv("RUN_MAX_PAGES", 200),
+    runMaxPagesPerBulk: intFromEnv("RUN_MAX_PAGES_PER_BULK", 50),
+    runJobPollIntervalMs: intFromEnv("RUN_JOB_POLL_INTERVAL_MS", 1500),
+    runJobPollAttempts: intFromEnv("RUN_JOB_POLL_ATTEMPTS", 60),
   };
 }

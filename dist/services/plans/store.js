@@ -100,6 +100,7 @@ class PostgresPlanStore {
           estimates,
           risk,
           policy_context,
+          llm_context,
           plan_hash,
           validation_issues,
           llm_usage_tokens,
@@ -108,8 +109,8 @@ class PostgresPlanStore {
         VALUES (
           $1, $2, $3, $4, $5, $6,
           $7, $8::jsonb, $9::jsonb, $10::jsonb,
-          $11::jsonb, $12::jsonb, $13::jsonb, $14,
-          $15::jsonb, $16, $17
+          $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15,
+          $16::jsonb, $17, $18
         )
         RETURNING
           plan_id,
@@ -125,6 +126,7 @@ class PostgresPlanStore {
           estimates,
           risk,
           policy_context,
+          llm_context,
           plan_hash,
           validation_issues,
           llm_usage_tokens,
@@ -152,10 +154,17 @@ class PostgresPlanStore {
                 max_pages: input.policyContext.maxPages,
                 max_cost_usd: input.policyContext.maxCostUsd,
             }),
+            JSON.stringify({
+                selected_model: input.llm.selectedModel,
+                task_class: input.llm.taskClass,
+                preference: input.llm.preference,
+                request_id: input.llm.requestId,
+                provider_request_id: input.llm.providerRequestId,
+            }),
             input.planHash,
             JSON.stringify(input.validationIssues),
             input.llmUsageTokens,
-            input.llmModel,
+            input.llm.selectedModel,
         ]);
         return mapPlanRow(result.rows[0]);
     }
@@ -175,6 +184,7 @@ class PostgresPlanStore {
           estimates,
           risk,
           policy_context,
+          llm_context,
           plan_hash,
           validation_issues,
           llm_usage_tokens,
@@ -259,6 +269,7 @@ class PostgresPlanStore {
           estimates,
           risk,
           policy_context,
+          llm_context,
           plan_hash,
           validation_issues,
           llm_usage_tokens,
@@ -281,10 +292,24 @@ class PostgresPlanStore {
 }
 exports.PostgresPlanStore = PostgresPlanStore;
 function mapPlanRow(row) {
+    const wpUserId = Number.parseInt(String(row.wp_user_id), 10);
+    const llmContext = row.llm_context ?? {};
+    const selectedModel = String(llmContext.selected_model
+        ?? llmContext.model
+        ?? row.llm_model
+        ?? row.policy_context?.model
+        ?? "");
+    const taskClass = String(llmContext.task_class ?? "planning");
+    const preference = String(llmContext.preference ?? "balanced");
+    const requestId = String(llmContext.request_id ?? "");
+    const providerRequestIdRaw = llmContext.provider_request_id;
+    const providerRequestId = providerRequestIdRaw === undefined || providerRequestIdRaw === null
+        ? undefined
+        : String(providerRequestIdRaw);
     return {
         planId: row.plan_id,
         installationId: row.installation_id,
-        wpUserId: row.wp_user_id,
+        wpUserId: Number.isFinite(wpUserId) ? wpUserId : 0,
         skillId: row.skill_id,
         policyPreset: row.policy_preset,
         status: row.status,
@@ -296,7 +321,7 @@ function mapPlanRow(row) {
         risk: row.risk,
         policyContext: {
             policyPreset: String(row.policy_context?.policy_preset ?? row.policy_preset),
-            model: String(row.policy_context?.model ?? row.llm_model ?? ""),
+            model: String(row.policy_context?.model ?? selectedModel),
             maxSteps: Number.parseInt(String(row.policy_context?.max_steps ?? "0"), 10) || 0,
             maxToolCalls: Number.parseInt(String(row.policy_context?.max_tool_calls ?? "0"), 10) || 0,
             maxPages: Number.parseInt(String(row.policy_context?.max_pages ?? "0"), 10) || 0,
@@ -305,7 +330,23 @@ function mapPlanRow(row) {
         planHash: row.plan_hash,
         validationIssues: row.validation_issues ?? [],
         llmUsageTokens: row.llm_usage_tokens,
-        llmModel: row.llm_model,
+        llm: {
+            selectedModel,
+            taskClass: taskClass === "chat_fast"
+                || taskClass === "chat_balanced"
+                || taskClass === "chat_quality"
+                || taskClass === "planning"
+                || taskClass === "code"
+                || taskClass === "summarize"
+                || taskClass === "extract_json"
+                ? taskClass
+                : "planning",
+            preference: preference === "cheap" || preference === "balanced" || preference === "quality"
+                ? preference
+                : "balanced",
+            requestId,
+            providerRequestId,
+        },
         createdAt: row.created_at,
         updatedAt: row.updated_at,
     };

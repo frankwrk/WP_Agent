@@ -158,6 +158,7 @@ export function verifyCanonicalStringSignature(options: {
 export function createSignedRequestHeaders(options: SignedRequestOptions): {
   headers: Record<string, string>;
   canonicalString: string;
+  toolCallId: string;
 } {
   const config = getConfig();
   const timestamp = options.timestamp ?? Math.floor(Date.now() / 1000);
@@ -198,5 +199,6 @@ export function createSignedRequestHeaders(options: SignedRequestOptions): {
       "X-WP-Agent-SignatureAlg": SIGNATURE_ALGORITHM,
     },
     canonicalString,
+    toolCallId,
   };
 }

@@ -37,6 +37,16 @@ class MemorySkillStore {
             updatedAt: new Date().toISOString(),
         });
     }
+    async getLatestSuccessfulIngestion(installationId) {
+        const matches = [...this.ingestions.values()]
+            .filter((ingestion) => ingestion.installationId === installationId && ingestion.status === "succeeded")
+            .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        return matches[0] ?? null;
+    }
+    async countActiveSkills(installationId) {
+        const records = this.specsByInstallation.get(installationId) ?? [];
+        return records.length;
+    }
     async replaceSkillSpecs(input) {
         const now = new Date().toISOString();
         const records = input.specs.map((spec) => ({
@@ -188,6 +198,48 @@ class PostgresSkillStore {
           updated_at = NOW()
         WHERE ingestion_id = $1
       `, [input.ingestionId, input.status, input.error ?? null]);
+    }
+    async getLatestSuccessfulIngestion(installationId) {
+        const result = await this.pool.query(`
+        SELECT
+          ingestion_id,
+          installation_id,
+          repo_url,
+          commit_sha,
+          ingestion_hash,
+          status,
+          error,
+          created_at,
+          updated_at
+        FROM skill_ingestions
+        WHERE installation_id = $1
+          AND status = 'succeeded'
+        ORDER BY created_at DESC
+        LIMIT 1
+      `, [installationId]);
+        if (!result.rowCount) {
+            return null;
+        }
+        const row = result.rows[0];
+        return {
+            ingestionId: row.ingestion_id,
+            installationId: row.installation_id,
+            repoUrl: row.repo_url,
+            commitSha: row.commit_sha,
+            ingestionHash: row.ingestion_hash,
+            status: row.status,
+            error: row.error,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+        };
+    }
+    async countActiveSkills(installationId) {
+        const result = await this.pool.query(`
+        SELECT COUNT(*)::text AS total
+        FROM skill_specs
+        WHERE installation_id = $1
+      `, [installationId]);
+        return Number.parseInt(result.rows[0]?.total ?? "0", 10) || 0;
     }
     async replaceSkillSpecs(input) {
         const client = await this.pool.connect();

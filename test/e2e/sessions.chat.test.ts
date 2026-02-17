@@ -11,7 +11,7 @@ import type {
   ChatCompletionRequest,
   ChatCompletionResult,
   LlmClient,
-} from "../../src/services/llm/openrouter.client";
+} from "../../src/services/llm/ai-gateway.client";
 
 const INSTALLATION_ID = "1655a4af-6678-4ebe-a570-58f49fa2f73d";
 
@@ -19,8 +19,8 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
     port: 3001,
     databaseUrl: "",
-    openrouterApiKey: "test-key",
-    openrouterBaseUrl: "https://openrouter.test/api/v1",
+    aiGatewayApiKey: "test-key",
+    aiGatewayBaseUrl: "https://ai-gateway.test/v1",
     pairingBootstrapSecret: "test-bootstrap-secret",
     signatureTtlSeconds: 180,
     signatureMaxSkewSeconds: 300,
@@ -176,6 +176,8 @@ test("session creation loads tool context once and resumes on repeat", async () 
 
   assert.equal(first.statusCode, 200);
   assert.equal(first.json().data.resumed, false);
+  assert.equal(typeof first.headers["x-request-id"], "string");
+  assert.equal(first.json().meta.request_id, first.headers["x-request-id"]);
   assert.equal(contextLoader.calls, 1);
 
   const second = await app.inject({
@@ -193,6 +195,8 @@ test("session creation loads tool context once and resumes on repeat", async () 
 
   assert.equal(second.statusCode, 200);
   assert.equal(second.json().data.resumed, true);
+  assert.equal(typeof second.headers["x-request-id"], "string");
+  assert.equal(second.json().meta.request_id, second.headers["x-request-id"]);
   assert.equal(contextLoader.calls, 1);
 
   await app.close();
@@ -235,6 +239,8 @@ test("POST /api/v1/sessions/:id/messages reuses cached context and stores messag
   });
 
   assert.equal(message.statusCode, 200);
+  assert.equal(typeof message.headers["x-request-id"], "string");
+  assert.equal(message.json().meta.request_id, message.headers["x-request-id"]);
   assert.equal(
     message.json().data.assistant_message.content,
     "Inventory says you have 10 items.",

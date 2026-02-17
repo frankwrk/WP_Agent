@@ -32,6 +32,15 @@ function parseToolDefinition(input) {
         endpoint,
         method,
         readOnly,
+        safetyClass: candidate.safetyClass === "read"
+            || candidate.safetyClass === "write_draft"
+            || candidate.safetyClass === "write_publish"
+            ? candidate.safetyClass
+            : undefined,
+        costWeight: Number.isFinite(Number(candidate.costWeight))
+            ? Number(candidate.costWeight)
+            : undefined,
+        internalOnly: candidate.internalOnly === undefined ? undefined : Boolean(candidate.internalOnly),
         inputSchema: candidate.inputSchema && typeof candidate.inputSchema === "object"
             ? candidate.inputSchema
             : undefined,

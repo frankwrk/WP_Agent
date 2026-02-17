@@ -11,11 +11,12 @@ import { FixedWindowRateLimiter } from "../services/policy/limiter";
 import { buildPolicyMap } from "../services/policy/policy.store";
 import { isPolicyPreset, type PolicyPreset } from "../services/policy/policy.schema";
 import {
-  OpenRouterClient,
+  AiGatewayClient,
   type ChatCompletionMessage,
   type LlmClient,
-} from "../services/llm/openrouter.client";
+} from "../services/llm/ai-gateway.client";
 import { selectModelForPolicy } from "../services/llm/model.select";
+import { parseModelPreference } from "../services/llm/models";
 import { getUtcDayStartIso } from "../services/llm/usage.ledger";
 import {
   computePlanHash,
@@ -42,6 +43,14 @@ import {
   PostgresSkillStore,
   type SkillStore,
 } from "../services/skills/store";
+import {
+  MemoryRunStore,
+  PostgresRunStore,
+  type RunStore,
+  type RunRecord,
+} from "../services/runs/store";
+import { RunExecutor } from "../services/runs/executor";
+import { mapRunExecutionInput, RunInputError } from "../services/runs/input.mapper";
 import { fetchToolManifest } from "../services/wp/tool.manifest";
 import { buildPlannerMessages } from "../services/plans/planner.prompt";
 
@@ -51,6 +60,8 @@ export interface RunsRouteOptions {
   config?: AppConfig;
   planStore?: PlanStore;
   skillStore?: SkillStore;
+  runStore?: RunStore;
+  runExecutor?: RunExecutor;
   llmClient?: LlmClient;
   manifestToolsLoader?: (installationId: string) => Promise<Set<string>>;
 }
@@ -85,6 +96,15 @@ function createSkillStore(config: AppConfig): SkillStore {
   }
 
   return new PostgresSkillStore(pool);
+}
+
+function createRunStore(config: AppConfig): RunStore {
+  const pool = getPool(config);
+  if (!pool) {
+    return new MemoryRunStore();
+  }
+
+  return new PostgresRunStore(pool);
 }
 
 function constantTimeEqual(a: string, b: string): boolean {
@@ -173,11 +193,71 @@ function mapPlanRecordToContract(record: PlanRecord): PlanContract {
     risk: record.risk,
     validationIssues: record.validationIssues,
     policyContext: record.policyContext,
+    llm: record.llm,
     status: record.status,
     llmUsageTokens: record.llmUsageTokens,
-    llmModel: record.llmModel,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
+  };
+}
+
+function toApiRun(record: RunRecord): Record<string, unknown> {
+  return {
+    run_id: record.runId,
+    installation_id: record.installationId,
+    wp_user_id: record.wpUserId,
+    plan_id: record.planId,
+    status: record.status,
+    planned_steps: record.plannedSteps,
+    planned_tool_calls: record.plannedToolCalls,
+    planned_pages: record.plannedPages,
+    actual_tool_calls: record.actualToolCalls,
+    actual_pages: record.actualPages,
+    error_code: record.errorCode,
+    error_message: record.errorMessage,
+    rollback_available: record.rollbackAvailable,
+    created_at: record.createdAt,
+    updated_at: record.updatedAt,
+    started_at: record.startedAt,
+    finished_at: record.finishedAt,
+  };
+}
+
+function parseRunCreatePayload(raw: unknown): {
+  value?: {
+    installationId: string;
+    wpUserId: number;
+    planId: string;
+  };
+  error?: string;
+} {
+  if (!raw || typeof raw !== "object") {
+    return { error: "Payload must be a JSON object" };
+  }
+
+  const body = raw as Record<string, unknown>;
+  const installationId = String(body.installation_id ?? "").trim();
+  const wpUserId = Number.parseInt(String(body.wp_user_id ?? ""), 10);
+  const planId = String(body.plan_id ?? "").trim();
+
+  if (!isValidUuid(installationId)) {
+    return { error: "installation_id must be a valid UUID" };
+  }
+
+  if (!Number.isInteger(wpUserId) || wpUserId <= 0) {
+    return { error: "wp_user_id must be a positive integer" };
+  }
+
+  if (!isValidUuid(planId)) {
+    return { error: "plan_id must be a valid UUID" };
+  }
+
+  return {
+    value: {
+      installationId,
+      wpUserId,
+      planId,
+    },
   };
 }
 
@@ -186,6 +266,7 @@ function parseDraftPayload(raw: unknown): {
     installationId: string;
     wpUserId: number;
     policyPreset: PolicyPreset;
+    modelPreference: ReturnType<typeof parseModelPreference>;
     skillId: string;
     goal: string;
     inputs: Record<string, unknown>;
@@ -200,6 +281,7 @@ function parseDraftPayload(raw: unknown): {
   const installationId = String(body.installation_id ?? "").trim();
   const wpUserId = Number.parseInt(String(body.wp_user_id ?? ""), 10);
   const policyPreset = String(body.policy_preset ?? "balanced").trim().toLowerCase();
+  const modelPreference = parseModelPreference(body.model_preference);
   const skillId = String(body.skill_id ?? "").trim();
   const goal = String(body.goal ?? "").trim();
   const inputs = body.inputs;
@@ -233,6 +315,7 @@ function parseDraftPayload(raw: unknown): {
       installationId,
       wpUserId,
       policyPreset,
+      modelPreference,
       skillId,
       goal,
       inputs: inputs as Record<string, unknown>,
@@ -302,6 +385,11 @@ function parsePlanScopeQuery(raw: unknown): {
   };
 }
 
+function parsePreferenceHeader(rawHeader: string | string[] | undefined) {
+  const value = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
+  return parseModelPreference(value);
+}
+
 async function defaultManifestToolLoader(
   installationId: string,
   config: AppConfig,
@@ -314,10 +402,19 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
   const config = options.config ?? getConfig();
   const planStore = options.planStore ?? createPlanStore(config);
   const skillStore = options.skillStore ?? createSkillStore(config);
-  const llmClient = options.llmClient ?? new OpenRouterClient();
+  const runStore = options.runStore ?? createRunStore(config);
+  const llmClient = options.llmClient ?? new AiGatewayClient();
   const manifestToolsLoader = options.manifestToolsLoader
     ? options.manifestToolsLoader
     : (installationId: string) => defaultManifestToolLoader(installationId, config);
+
+  const runExecutor = options.runExecutor ?? new RunExecutor({
+    runStore,
+    wpToolApiBase: config.wpToolApiBase,
+    jobPollIntervalMs: Math.max(100, config.runJobPollIntervalMs),
+    jobPollAttempts: Math.max(1, config.runJobPollAttempts),
+    logger: app.log,
+  });
 
   const policyMap = buildPolicyMap(config);
   const toolRegistry = getToolRegistry();
@@ -378,9 +475,33 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
     const maxPages = Math.max(1, config.planMaxPages);
     const maxCostUsd = Math.max(0.01, config.planMaxCostUsd);
 
+    const selectedModel = selectModelForPolicy({
+      policy,
+      policyPreset: payload.policyPreset,
+      taskClass: "planning",
+      explicitPreference:
+        payload.modelPreference
+        ?? parsePreferenceHeader(request.headers["x-wp-agent-model-preference"]),
+      routeDefaultPreference: "quality",
+    });
+
+    const llmRequestId = randomUUID();
+
+    request.log.info(
+      {
+        requestId: request.id,
+        llmRequestId,
+        taskClass: selectedModel.taskClass,
+        preference: selectedModel.preference,
+        selectedModel: selectedModel.model,
+        routingReason: selectedModel.routingReason,
+      },
+      "llm model selected",
+    );
+
     const policyContext: PlanPolicyContext = {
       policyPreset: payload.policyPreset,
-      model: selectModelForPolicy(policy),
+      model: selectedModel.model,
       maxSteps,
       maxToolCalls,
       maxPages,
@@ -399,19 +520,33 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
 
     let llmRawOutput = "";
     let llmUsageTokens = 0;
-    let llmModel = policyContext.model;
+    let providerRequestId: string | undefined;
 
     try {
       const completion = await llmClient.completeChat({
-        model: policyContext.model,
+        requestId: llmRequestId,
+        model: selectedModel.model,
         messages: plannerMessages,
         maxTokens: 1100,
       });
       llmRawOutput = completion.content;
       llmUsageTokens = completion.usageTokens;
-      llmModel = completion.model;
+      providerRequestId = completion.providerRequestId;
+
+      request.log.info(
+        {
+          requestId: request.id,
+          llmRequestId,
+          providerRequestId,
+          taskClass: selectedModel.taskClass,
+          preference: selectedModel.preference,
+          selectedModel: completion.model,
+          routingReason: selectedModel.routingReason,
+        },
+        "llm request completed",
+      );
     } catch (error) {
-      request.log.error({ error }, "plan draft llm request failed");
+      request.log.error({ error, requestId: request.id, llmRequestId }, "plan draft llm request failed");
       return reply
         .code(502)
         .send(errorResponse("PLAN_LLM_FAILED", "Planner model request failed"));
@@ -455,14 +590,14 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
       estimate: {
         estimatedPages: 0,
         estimatedToolCalls: {},
-        estimatedTokensBucket: "low" as const,
-        estimatedCostUsdBand: "low" as const,
+        estimatedTokensBucket: "low",
+        estimatedCostUsdBand: "low",
         estimatedRuntimeSec: 0,
-        confidenceBand: "low" as const,
+        confidenceBand: "low",
         estimatedCostUsd: 0,
       },
       risk: {
-        tier: "LOW" as const,
+        tier: "LOW",
         score: 0,
         factors: {
           numberOfSteps: 0,
@@ -471,11 +606,14 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
           costRatioToCap: 0,
         },
       },
-      gatingIssues: [] as PlanValidationIssue[],
+      gatingIssues: [],
     };
 
     if (validation.plan) {
-      const effectiveMaxCost = Math.min(maxCostUsd, skill.caps.maxCostUsd ?? Number.MAX_SAFE_INTEGER);
+      const effectiveMaxCost = Math.min(
+        maxCostUsd,
+        skill.caps.maxCostUsd ?? Number.MAX_SAFE_INTEGER,
+      );
       estimateResult = estimatePlan({
         steps: validation.plan.steps,
         toolRegistry,
@@ -523,7 +661,13 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
       planHash,
       validationIssues: allIssues,
       llmUsageTokens,
-      llmModel,
+      llm: {
+        selectedModel: selectedModel.model,
+        taskClass: selectedModel.taskClass,
+        preference: selectedModel.preference,
+        requestId: llmRequestId,
+        providerRequestId,
+      },
     });
 
     await planStore.appendPlanEvent({
@@ -673,6 +817,316 @@ export async function runsRoutes(app: FastifyInstance, options: RunsRouteOptions
       data: {
         plan: toApiPlan(mapPlanRecordToContract(updated)),
         events: events.map((event) => toApiEvent(event)),
+      },
+      error: null,
+      meta: null,
+    });
+  });
+
+  app.post("/runs", async (request, reply) => {
+    if (!validateBootstrapHeader(request.headers["x-wp-agent-bootstrap"], config)) {
+      return reply
+        .code(401)
+        .send(errorResponse("RUNS_AUTH_FAILED", "Invalid bootstrap authentication header"));
+    }
+
+    const parsed = parseRunCreatePayload(request.body);
+    if (!parsed.value) {
+      return reply
+        .code(400)
+        .send(errorResponse("VALIDATION_ERROR", parsed.error ?? "Invalid payload"));
+    }
+
+    const payload = parsed.value;
+    if (!(await planStore.isPairedInstallation(payload.installationId))) {
+      return reply
+        .code(404)
+        .send(errorResponse("INSTALLATION_NOT_PAIRED", "Installation is not paired"));
+    }
+
+    const activeRun = await runStore.getActiveRunForInstallation(payload.installationId);
+    if (activeRun) {
+      return reply.code(409).send(
+        errorResponse("RUN_ACTIVE_CONFLICT", "Installation already has an active run", {
+          active_run_id: activeRun.runId,
+        }),
+      );
+    }
+
+    const plan = await planStore.getPlan(payload.planId);
+    if (
+      !plan
+      || plan.installationId !== payload.installationId
+      || plan.wpUserId !== payload.wpUserId
+    ) {
+      return reply
+        .code(404)
+        .send(errorResponse("PLAN_NOT_FOUND", "Plan was not found for this user scope"));
+    }
+
+    if (plan.status !== "approved") {
+      return reply.code(409).send(
+        errorResponse("RUN_PLAN_NOT_APPROVED", "Plan must be approved before execution"),
+      );
+    }
+
+    const skill = await skillStore.getSkill(payload.installationId, plan.skillId);
+    if (!skill) {
+      return reply
+        .code(404)
+        .send(errorResponse("SKILL_NOT_FOUND", "Skill does not exist for this installation"));
+    }
+
+    let mapped;
+    try {
+      mapped = mapRunExecutionInput({
+        plan,
+        skill,
+        envCaps: {
+          maxSteps: config.runMaxSteps,
+          maxToolCalls: config.runMaxToolCalls,
+          maxPages: config.runMaxPages,
+        },
+        maxPagesPerBulk: config.runMaxPagesPerBulk,
+      });
+    } catch (error) {
+      if (error instanceof RunInputError) {
+        return reply.code(400).send(errorResponse(error.code, error.message));
+      }
+
+      return reply
+        .code(400)
+        .send(errorResponse("RUN_INVALID_INPUT", "Run input could not be mapped"));
+    }
+
+    const runId = randomUUID();
+    const createdRun = await runStore.createRun({
+      runId,
+      installationId: payload.installationId,
+      wpUserId: payload.wpUserId,
+      planId: payload.planId,
+      plannedSteps: mapped.plannedSteps,
+      plannedToolCalls: mapped.plannedToolCalls,
+      plannedPages: mapped.plannedPages,
+      inputPayload: {
+        mode: mapped.mode,
+        step_id: mapped.stepId,
+        pages: mapped.pages,
+        effective_caps: mapped.effectiveCaps,
+      },
+      steps: [
+        {
+          stepId: mapped.stepId,
+          plannedToolCalls: mapped.plannedToolCalls,
+          plannedPages: mapped.plannedPages,
+        },
+      ],
+    });
+
+    await runStore.appendRunEvent({
+      runId,
+      eventType: "run_created",
+      payload: {
+        plan_id: payload.planId,
+        mode: mapped.mode,
+        page_count: mapped.pages.length,
+      },
+    });
+
+    void runExecutor.executeRun(runId, payload.installationId).catch((error) => {
+      request.log.error({ error, runId }, "run executor crashed");
+    });
+
+    const details = await runStore.getRunWithDetails(runId);
+
+    return reply.code(202).send({
+      ok: true,
+      data: {
+        run: toApiRun(createdRun),
+        steps: details?.steps.map((step) => ({
+          step_id: step.stepId,
+          status: step.status,
+          planned_tool_calls: step.plannedToolCalls,
+          planned_pages: step.plannedPages,
+          actual_tool_calls: step.actualToolCalls,
+          actual_pages: step.actualPages,
+          error_code: step.errorCode,
+          error_message: step.errorMessage,
+          started_at: step.startedAt,
+          finished_at: step.finishedAt,
+        })) ?? [],
+        events: details?.events.map((event) => ({
+          id: event.id,
+          event_type: event.eventType,
+          payload: event.payload,
+          created_at: event.createdAt,
+        })) ?? [],
+        rollbacks: details?.rollbacks.map((rollback) => ({
+          handle_id: rollback.handleId,
+          kind: rollback.kind,
+          status: rollback.status,
+          error: rollback.error,
+          created_at: rollback.createdAt,
+          applied_at: rollback.appliedAt,
+        })) ?? [],
+      },
+      error: null,
+      meta: null,
+    });
+  });
+
+  app.get("/runs/:runId", async (request, reply) => {
+    if (!validateBootstrapHeader(request.headers["x-wp-agent-bootstrap"], config)) {
+      return reply
+        .code(401)
+        .send(errorResponse("RUNS_AUTH_FAILED", "Invalid bootstrap authentication header"));
+    }
+
+    const params = request.params as { runId?: string };
+    const scope = parsePlanScopeQuery(request.query);
+    if (!scope.value) {
+      return reply
+        .code(400)
+        .send(errorResponse("VALIDATION_ERROR", scope.error ?? "Invalid query"));
+    }
+
+    const runId = String(params.runId ?? "").trim();
+    if (!isValidUuid(runId)) {
+      return reply.code(400).send(errorResponse("VALIDATION_ERROR", "runId must be a valid UUID"));
+    }
+
+    const details = await runStore.getRunWithDetails(runId);
+    if (
+      !details
+      || details.run.installationId !== scope.value.installationId
+      || details.run.wpUserId !== scope.value.wpUserId
+    ) {
+      return reply
+        .code(404)
+        .send(errorResponse("RUN_NOT_FOUND", "Run was not found for this user scope"));
+    }
+
+    return reply.code(200).send({
+      ok: true,
+      data: {
+        run: toApiRun(details.run),
+        steps: details.steps.map((step) => ({
+          step_id: step.stepId,
+          status: step.status,
+          planned_tool_calls: step.plannedToolCalls,
+          planned_pages: step.plannedPages,
+          actual_tool_calls: step.actualToolCalls,
+          actual_pages: step.actualPages,
+          error_code: step.errorCode,
+          error_message: step.errorMessage,
+          started_at: step.startedAt,
+          finished_at: step.finishedAt,
+        })),
+        events: details.events.map((event) => ({
+          id: event.id,
+          event_type: event.eventType,
+          payload: event.payload,
+          created_at: event.createdAt,
+        })),
+        rollbacks: details.rollbacks.map((rollback) => ({
+          handle_id: rollback.handleId,
+          kind: rollback.kind,
+          status: rollback.status,
+          error: rollback.error,
+          created_at: rollback.createdAt,
+          applied_at: rollback.appliedAt,
+        })),
+      },
+      error: null,
+      meta: null,
+    });
+  });
+
+  app.post("/runs/:runId/rollback", async (request, reply) => {
+    if (!validateBootstrapHeader(request.headers["x-wp-agent-bootstrap"], config)) {
+      return reply
+        .code(401)
+        .send(errorResponse("RUNS_AUTH_FAILED", "Invalid bootstrap authentication header"));
+    }
+
+    const params = request.params as { runId?: string };
+    const scope = parsePlanScopePayload(request.body);
+    if (!scope.value) {
+      return reply
+        .code(400)
+        .send(errorResponse("VALIDATION_ERROR", scope.error ?? "Invalid payload"));
+    }
+
+    const runId = String(params.runId ?? "").trim();
+    if (!isValidUuid(runId)) {
+      return reply.code(400).send(errorResponse("VALIDATION_ERROR", "runId must be a valid UUID"));
+    }
+
+    const details = await runStore.getRunWithDetails(runId);
+    if (
+      !details
+      || details.run.installationId !== scope.value.installationId
+      || details.run.wpUserId !== scope.value.wpUserId
+    ) {
+      return reply
+        .code(404)
+        .send(errorResponse("RUN_NOT_FOUND", "Run was not found for this user scope"));
+    }
+
+    if (!details.run.rollbackAvailable) {
+      return reply
+        .code(409)
+        .send(errorResponse("RUN_ROLLBACK_NOT_AVAILABLE", "Run has no rollback handles"));
+    }
+
+    try {
+      await runExecutor.rollbackRun(runId, scope.value.installationId);
+    } catch (error) {
+      return reply.code(502).send(
+        errorResponse(
+          "RUN_ROLLBACK_FAILED",
+          error instanceof Error ? error.message : "Rollback failed",
+        ),
+      );
+    }
+
+    const updated = await runStore.getRunWithDetails(runId);
+    if (!updated) {
+      return reply
+        .code(404)
+        .send(errorResponse("RUN_NOT_FOUND", "Run was not found for this user scope"));
+    }
+
+    return reply.code(200).send({
+      ok: true,
+      data: {
+        run: toApiRun(updated.run),
+        steps: updated.steps.map((step) => ({
+          step_id: step.stepId,
+          status: step.status,
+          planned_tool_calls: step.plannedToolCalls,
+          planned_pages: step.plannedPages,
+          actual_tool_calls: step.actualToolCalls,
+          actual_pages: step.actualPages,
+          error_code: step.errorCode,
+          error_message: step.errorMessage,
+          started_at: step.startedAt,
+          finished_at: step.finishedAt,
+        })),
+        events: updated.events.map((event) => ({
+          id: event.id,
+          event_type: event.eventType,
+          payload: event.payload,
+          created_at: event.createdAt,
+        })),
+        rollbacks: updated.rollbacks.map((rollback) => ({
+          handle_id: rollback.handleId,
+          kind: rollback.kind,
+          status: rollback.status,
+          error: rollback.error,
+          created_at: rollback.createdAt,
+          applied_at: rollback.appliedAt,
+        })),
       },
       error: null,
       meta: null,
