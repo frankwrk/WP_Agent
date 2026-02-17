@@ -174,6 +174,11 @@ Both routes now emit stage timing metadata in response `meta.progress` with `met
 - `npm run dev`
 - `npm run build`
 - `npm test`
+- `npm run db:migrate` (applies `src/db/migrations/*.sql` to `DATABASE_URL`)
+
+For VM deploys, run migrations before restarting the backend process:
+
+- `npm --prefix apps/backend run db:migrate`
 
 ---
 
