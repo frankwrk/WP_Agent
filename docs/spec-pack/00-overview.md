@@ -1,5 +1,7 @@
 # WP Agent Runtime - Overview
 
+Public documentation note: this file is intentionally high-level. Detailed operational procedures and security-sensitive internals are maintained in private documentation.
+
 ## Milestone M0 Scope
 
 M0 established a runnable baseline with two integration surfaces:

@@ -95,6 +95,15 @@ directly.
 
 ⸻
 
+## Operations (Public)
+
+- [Runbooks index](docs/runbooks/README.md)
+- [Production integration (public stub)](docs/runbooks/production-integration.md)
+
+Detailed operational and security procedures are maintained privately.
+
+⸻
+
 ## MVP Changelog
 
 - 2026-02-16 — M0
@@ -145,7 +154,7 @@ directly.
   - Standardized plan API metadata to `plan.llm.*` (selected model, task class, preference, request IDs) and removed `llm_model` from API responses.
 
 - 2026-02-17 — Run Recovery on Restart
-  - Added backend startup reconciliation for stale active runs (`queued`, `running`, `rolling_back`) using `RUN_RECOVERY_STALE_MINUTES` (default `15`).
+  - Added backend startup reconciliation for stale active runs (`queued`, `running`, `rolling_back`) using `RUN_RECOVERY_STALE_MINUTES` (configurable).
   - Stale runs are now marked `failed` with `RUN_EXECUTION_ABORTED` and emit `run_recovered_after_restart` audit events.
   - Added recovery unit tests covering stale-run failure and fresh-run no-op behavior.
 

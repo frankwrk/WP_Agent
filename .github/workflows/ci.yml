@@ -5,6 +5,19 @@ on:
   pull_request:
 
 jobs:
+  docs-sensitivity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check docs for sensitive patterns
+        run: |
+          set -euo pipefail
+          PATTERN='api\.synqengine\.com|46\.224\.9\.81|/etc/synq|synqsvc|synqengine|x-wp-agent-bootstrap|installation_id:|BACKEND_SIGNING_PRIVATE_KEY|PAIRING_BOOTSTRAP_SECRET|supabase-ca\.pem'
+          if rg -n -e "$PATTERN" README.md docs AGENTS.md ROADMAP.md SECURITY.md DOCS_CLASSIFICATION.md; then
+            echo "Sensitive documentation pattern detected." >&2
+            exit 1
+          fi
+
   backend-build-and-test:
     runs-on: ubuntu-latest
     steps:

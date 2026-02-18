@@ -1,5 +1,7 @@
 # Skill Spec v1 (M3)
 
+Public documentation note: this file is intentionally schema-focused. Detailed operational procedures and security-sensitive internals are maintained in private documentation.
+
 ## Purpose
 
 M3 introduces a persisted skill registry per installation, sourced from a pinned repo commit.

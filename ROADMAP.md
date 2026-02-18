@@ -9,7 +9,7 @@
 
 ## M1 — Pairing + Security plumbing
 
-- [x] WP: generate installation_id + keypair; store private locally
+- [x] WP: generate site identity + keypair; store private locally
 - [x] Backend: /installations/pair stores public key
 - [x] Backend→WP signed tool call support (verify in WP)
 - [x] WP: idempotency store (tool_call_id)
@@ -46,3 +46,10 @@
 - [x] Rollback handles: revisions + delete support
 - [x] Backend: execute run state machine + step caps
 - [x] e2e: run pSEO smoke test creates 10 drafts
+
+## Documentation workflow (public/private)
+
+- Keep contributor workflow and milestone status in public docs.
+- Keep runbook operations and security-surface internals in the private docs repo.
+- When milestone docs are updated, keep public entries sanitized and reference public stubs where applicable.
+- Do not include environment identifiers, secrets, or operational scripts in public milestone updates.

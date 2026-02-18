@@ -1,5 +1,7 @@
 # Plan Contract v1 (M4)
 
+Public documentation note: this file is intentionally contract-focused. Detailed operational procedures and security-sensitive internals are maintained in private documentation.
+
 ## Purpose
 
 Plan generation is now a dedicated backend phase (`/api/v1/plans/*`) and remains execute-free in M3.

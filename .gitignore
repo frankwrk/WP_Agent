@@ -1,5 +1,8 @@
 .env
 .env.local
+infra/
+node_modules/
+**/node_modules/
 
 WP_Agent.code-workspace
 

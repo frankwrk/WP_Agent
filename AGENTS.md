@@ -26,7 +26,7 @@ This repo contains:
 
 ## Milestone workflow
 
-- Work in milestones M0..M4 described in ROADMAP.md.
+- Work in milestones described in ROADMAP.md.
 - Each milestone produces:
   - code changes
   - updated spec docs (if needed)
@@ -34,6 +34,22 @@ This repo contains:
   - a short CHANGELOG entry in README.md (MVP section)
 - When a milestone item is completed, update ROADMAP.md checklist state in the same PR.
 - Every milestone PR must append one README MVP changelog entry with date, milestone, and a short change summary.
+- Public milestone updates must stay sanitized; operational/security detail belongs in private docs.
+- When updating milestones, reference public stubs in this repo and keep implementation runbooks in the private docs repo.
+
+## Documentation model (public/private)
+
+- Public repo docs are contributor-facing and sanitized.
+- Operational runbooks and security-surface internals are private-only.
+- If a sensitive public doc must exist for discoverability, keep it as a `private-reference` stub that points to a private path.
+- Follow `DOCS_CLASSIFICATION.md` for redaction and review requirements.
+
+## Local docs guardrail
+
+- Enable the local pre-push hook once per clone:
+  - `git config core.hooksPath .githooks`
+- Emergency bypass exists but should be avoided:
+  - `git push --no-verify`
 
 ## Implementation order (do not reorder)
 
