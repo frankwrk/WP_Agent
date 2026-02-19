@@ -99,12 +99,50 @@ directly.
 
 - [Runbooks index](docs/runbooks/README.md)
 - [Production integration (public stub)](docs/runbooks/production-integration.md)
+- [Progress log](docs/PROGRESS.md)
 
 Detailed operational and security procedures are maintained privately.
 
 ⸻
 
+## Current Status (2026-02-18)
+
+- Production endpoint: `https://api.synqengine.com`
+- Runtime architecture: `Nginx -> localhost:3001 -> Fastify (Node 22) -> Supabase Postgres`
+- Runtime service: `systemd` unit `synq-backend.service` running as user `synqsvc`
+
+Step 1 complete: Supabase TLS CA verification
+
+- Production DB connections enforce CA verification via `SUPABASE_SSL_ROOT_CERT_PATH=<SUPABASE_SSL_ROOT_CERT_PATH>`.
+- `sslmode=no-verify` is not allowed in production.
+- Deploy-time migration `EACCES` issue was resolved through deployment group permission fixes.
+
+Step 2 complete: Pairing + bootstrap auth E2E
+
+- `POST /api/v1/installations/pair` returns `401` when bootstrap auth header is missing.
+- Pairing succeeds when bootstrap auth is present and valid.
+- Pairing creates/persists an `installation_id`.
+
+Step 3 complete: Skills sync from pinned repo
+
+- Endpoint: `POST /api/v1/skills/sync`
+- Auth: bootstrap header
+- Repo pin: `https://github.com/frankwrk/marketingskills.git`
+- Commit SHA: `58d5ca2fcb971645f9b6b5821416cb68b4770588`
+- Result: `skill_count=1`, `status=succeeded`
+- Repeating sync with same pin returns unchanged status (idempotent behavior).
+- `GET /api/v1/skills?installation_id=<INSTALLATION_ID>` returns Programmatic SEO skill.
+
+Next: Step 4 (Create chat session + draft plan)
+
+⸻
+
 ## MVP Changelog
+
+- 2026-02-18 — Production Integration Snapshot (Steps 1-3)
+  - Added a public-safe current-status snapshot for production integration stage.
+  - Documented Step 1 (Supabase TLS CA verification), Step 2 (pairing/bootstrap auth), and Step 3 (pinned skills sync) completion signals.
+  - Added `docs/PROGRESS.md` with verification commands, constraints, and Step 4 next action.
 
 - 2026-02-16 — M0
   - Implemented backend `GET /api/v1/health`.

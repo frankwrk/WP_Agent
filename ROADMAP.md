@@ -1,5 +1,16 @@
 # ROADMAP.md (MVP)
 
+## Production Integration Steps (Current)
+
+- [x] Step 1 — Supabase TLS CA verification (maps to M1 security plumbing).
+  Evidence: production DB TLS uses CA verification (`SUPABASE_SSL_ROOT_CERT_PATH`), `sslmode=no-verify` disallowed, deploy migration `EACCES` fixed via group-permission correction.
+- [x] Step 2 — Pairing + bootstrap auth end-to-end (maps to M1).
+  Evidence: missing bootstrap auth returns `401`; valid pairing succeeds and persists `installation_id`.
+- [x] Step 3 — Skills sync from pinned repository (maps to M3).
+  Evidence: `POST /api/v1/skills/sync` with `https://github.com/frankwrk/marketingskills.git` @ `58d5ca2fcb971645f9b6b5821416cb68b4770588` returned `skill_count=1`, `status=succeeded`, and repeated sync remained unchanged (idempotent).
+- [ ] Step 4 — Create chat session + draft plan (maps to M2 + M3).
+  Current milestone: Step 4.
+
 ## M0 — Skeleton
 
 - [x] Backend: health route, config, logging

@@ -18,6 +18,10 @@ Do not open public issues with exploit details, credentials, or environment-spec
 Operational procedures, environment runbooks, and detailed security internals are maintained in the private docs repository.
 Public docs in this repository are intentionally sanitized.
 
+## Log Hygiene
+Do not paste bootstrap secrets, API keys, or token values into public issues, PRs, or comments.
+After any testing session that exposes temporary credentials, rotate the affected secrets.
+
 ## Remediation Expectations
 - triage reported issues promptly
 - apply least-privilege and defense-in-depth controls
