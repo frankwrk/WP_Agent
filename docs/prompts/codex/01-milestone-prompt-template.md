@@ -12,6 +12,7 @@ Deliver:
 2. File tree diff
 3. Commands to run locally
 4. Tests added and what they validate
+5. For WordPress plugin changes: confirm plugin version bump and run `npm run check:synq-engine-plugin-version`
 
 Stop when:
 

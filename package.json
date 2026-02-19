@@ -4,7 +4,7 @@
   "packageManager": "pnpm@9.0.0",
   "workspaces": [
     "apps/backend",
-    "apps/wp-plugin/admin",
+    "apps/synq-engine-plugin/admin",
     "packages/*"
   ],
   "scripts": {
@@ -12,6 +12,10 @@
     "test": "pnpm -r test",
     "dev": "pnpm -r dev",
     "fmt": "pnpm -r fmt",
-    "deploy:backend": "bash scripts/deploy-backend.sh"
+    "deploy:backend": "bash scripts/deploy-backend.sh",
+    "check:synq-engine-plugin-version": "bash scripts/check-synq-engine-plugin-version.sh",
+    "package:synq-engine-plugin": "bash scripts/package-synq-engine-plugin.sh",
+    "check:wp-plugin-version": "npm run check:synq-engine-plugin-version",
+    "package:wp-plugin": "npm run package:synq-engine-plugin"
   }
 }

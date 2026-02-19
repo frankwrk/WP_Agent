@@ -10,7 +10,7 @@ This repo contains:
 1. NO new WP Tool API endpoints (under `/wp-json/wp-agent/v1/*`) without updating:
    - docs/spec-pack/02-tool-api.md (WP)
    - apps/backend/src/services/wp/tool.manifest.ts (backend)
-   - apps/wp-plugin/includes/rest/tools/manifest.php (WP)
+   - apps/synq-engine-plugin/includes/rest/tools/manifest.php (WP)
    - Note: backend-only endpoints (example: `/api/v1/health`) are exempt from this Tool API manifest rule.
 2. NO write tools without:
    - capability checks (`manage_options` or equivalent)
@@ -23,6 +23,14 @@ This repo contains:
 4. All skill runs must use two-phase commit:
    - Plan phase (read-only tools + plan.md generation + estimate)
    - Execute phase (explicit approval + bounded tool calls)
+5. All WordPress plugin changes must follow modern WP/WP-plugin best practices:
+   - capability checks (`manage_options` or equivalent) on admin mutation routes
+   - nonce verification for WP-admin REST calls
+   - sanitize/validate all request input and escape output rendered in admin/UI contexts
+   - never log secrets, private keys, bootstrap tokens, or raw auth material
+   - preserve backward compatibility for option/schema changes (migration-safe defaults)
+   - avoid deprecated WordPress APIs and follow current WordPress coding standards
+   - bump plugin version on every plugin code or bundled-admin-asset change
 
 ## Milestone workflow
 
